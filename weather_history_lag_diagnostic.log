@@ -1,16 +1,57 @@
-[2026-04-03 11:38:38] [CFG] TARGET_PAGE_URL=https://www.wunderground.com/history/daily/fr/paris/LFPI/date/2026-4-3
-[2026-04-03 11:38:38] [CFG] LOCATION_ID=LFPI:9:FR (resolved from page API)
-[2026-04-03 11:38:38] [CFG] API_UNITS=m
-[2026-04-03 11:38:38] [CFG] HISTORY_DATE=20260403
-[2026-04-03 11:38:38] [CFG] CHECK_INTERVAL_SECONDS=5
-[2026-04-03 11:38:38] [CFG] SHOW_BROWSER_WINDOW=False
-[2026-04-03 11:38:38] [CFG] REBUILD_BROWSER_EVERY_N_POLLS=120
-[2026-04-03 11:38:38] [CFG] UI_RENDER_MODE=AUTO
-[2026-04-03 11:38:38] [CFG] LOG_FILE_PATH=C:\Users\Dmytro Govor\Documents\Weather\weather_history_lag_diagnostic.log
-[2026-04-03 11:38:38] [CFG] JSONL_FILE_PATH=C:\Users\Dmytro Govor\Documents\Weather\weather_history_lag_diagnostic.jsonl
-[2026-04-03 11:38:39] [API_NEW] value=7.000°C temp_c=7.000°C temp_f=44.600°F valid_time_gmt=1775203200 (2026-04-03 08:00:00 UTC) obs_time_local= observations=11
-[2026-04-03 11:38:39] [BROWSER] Creating Chrome driver...
-[2026-04-03 11:39:24] [BROWSER_RESET] TimeoutException: webdriver failure; recreating driver
-[2026-04-03 11:39:32] [BROWSER] Creating Chrome driver...
-[2026-04-03 11:39:54] [UI_NEW] render_mode=C value=46.000°C temp_c=46.000°C temp_f=114.800°F source=svg_temperature_line path_last=(500.000,21.429) y_scale_top=47.000@0.000 y_scale_bottom=40.000@150.000 points=11
-[2026-04-03 11:39:54] [DIFF] ui_temp_c=46.000°C ui_temp_f=114.800°F closest_unmatched_api_c=7.000°C delta_c=39.000°C state=WAITING_UI_OR_MISMATCH
+[2026-04-03 12:28:03] [CFG] TARGET_PAGE_URL=https://www.wunderground.com/history/daily/fr/paris/LFPI/date/2026-4-3
+[2026-04-03 12:28:03] [CFG] LOCATION_ID=LFPI:9:FR (resolved from page API)
+[2026-04-03 12:28:03] [CFG] API_UNITS=m
+[2026-04-03 12:28:03] [CFG] HISTORY_DATE=20260403
+[2026-04-03 12:28:03] [CFG] CHECK_INTERVAL_SECONDS=5
+[2026-04-03 12:28:03] [CFG] SHOW_BROWSER_WINDOW=False
+[2026-04-03 12:28:03] [CFG] REBUILD_BROWSER_EVERY_N_POLLS=120
+[2026-04-03 12:28:03] [CFG] MATCH_TOLERANCE_C=0.001
+[2026-04-03 12:28:03] [CFG] MATCH_TOLERANCE_F=0.001
+[2026-04-03 12:28:03] [CFG] LOG_FILE_PATH=C:\Users\Dmytro Govor\Documents\Weather\weather_history_lag_diagnostic.log
+[2026-04-03 12:28:03] [CFG] JSONL_FILE_PATH=C:\Users\Dmytro Govor\Documents\Weather\weather_history_lag_diagnostic.jsonl
+[2026-04-03 12:28:04] [API_NEW] value=7.000°C temp_c=7.000°C temp_f=44.600°F valid_time_gmt=1775203200 (2026-04-03 08:00:00 UTC) obs_time_local= observations=11
+[2026-04-03 12:28:04] [BROWSER] Creating Chrome driver...
+[2026-04-03 12:28:29] [ERR] RuntimeError: No usable temperature SVG streams found. Candidate errors: idx=0 err=Cannot infer stream unit from tick values: [Decimal('47'), Decimal('46'), Decimal('45'), Decimal('44'), Decimal('43'), Decimal('42'), Decimal('41'), Decimal('40')] | debug={'lastPayload': {'candidates': [{'index': 0, 'leftBandMax': 140, 'pathD': 'M0,0L50,42.857142857142854L100,64.28571428571429L150,107.14285714285714L200,107.14285714285714L250,150L300,150L350,150L400,128.57142857142858L450,64.28571428571429L500,21.428571428571434', 'svgRect': {'bottom': 552.59375, 'height': 171.5, 'left': 169.3203125, 'right': 1400.6796875, 'top': 381.09375, 'width': 1231.359375}, 'yTicks': [{'text': '40', 'x': '2.6572265625', 'y': '171.3399658203125'}, {'text': '41', 'x': '2.5', 'y': '149.91143798828125'}, {'text': '42', 'x': '2.6572265625', 'y': '128.48284912109375'}, {'text': '43', 'x': '2.6572265625', 'y': '107.05429077148438'}, {'text': '44', 'x': '2.6572265625', 'y': '85.62571716308594'}, {'text': '45', 'x': '2.6572265625', 'y': '64.1971435546875'}, {'text': '46', 'x': '2.6572265625', 'y': '42.768585205078125'}, {'text': '47', 'x': '2.6572265625', 'y': '21.339996337890625'}, {'text': '1', 'x': '5.8359375', 'y': '198.34002685546875'}]}], 'jsError': None, 'noData': False, 'pageTitle': 'Paris, France Weather History | Weather Underground'}, 'pathCount': 1, 'tickTexts': ['12AM', '3AM', '6AM', '9AM', '12PM', '3PM', '6PM', '9PM', '12AM', '40', '41', '42', '43', '44', '45', '46', '47', '0', '0.2', '0.4', '0.6', '0.8', '1', '12AM', '3AM', '6AM', '9AM', '12PM', '3PM', '6PM', '9PM', '12AM', '2', '4', '6', '8', '10'], 'title': 'Paris, France Weather History | Weather Underground'}
+[2026-04-03 12:28:39] [ERR] RuntimeError: No usable temperature SVG streams found. Candidate errors: idx=0 err=Cannot infer stream unit from tick values: [Decimal('47'), Decimal('46'), Decimal('45'), Decimal('44'), Decimal('43'), Decimal('42'), Decimal('41'), Decimal('40')] | debug={'lastPayload': {'candidates': [{'index': 0, 'leftBandMax': 140, 'pathD': 'M0,0L50,42.857142857142854L100,64.28571428571429L150,107.14285714285714L200,107.14285714285714L250,150L300,150L350,150L400,128.57142857142858L450,64.28571428571429L500,21.428571428571434', 'svgRect': {'bottom': 552.59375, 'height': 171.5, 'left': 169.3203125, 'right': 1400.6796875, 'top': 381.09375, 'width': 1231.359375}, 'yTicks': [{'text': '40', 'x': '2.6572265625', 'y': '171.3399658203125'}, {'text': '41', 'x': '2.5', 'y': '149.91143798828125'}, {'text': '42', 'x': '2.6572265625', 'y': '128.48284912109375'}, {'text': '43', 'x': '2.6572265625', 'y': '107.05429077148438'}, {'text': '44', 'x': '2.6572265625', 'y': '85.62571716308594'}, {'text': '45', 'x': '2.6572265625', 'y': '64.1971435546875'}, {'text': '46', 'x': '2.6572265625', 'y': '42.768585205078125'}, {'text': '47', 'x': '2.6572265625', 'y': '21.339996337890625'}, {'text': '1', 'x': '5.8359375', 'y': '198.34002685546875'}]}], 'jsError': None, 'noData': False, 'pageTitle': 'Paris, France Weather History | Weather Underground'}, 'pathCount': 1, 'tickTexts': ['12AM', '3AM', '6AM', '9AM', '12PM', '3PM', '6PM', '9PM', '12AM', '40', '41', '42', '43', '44', '45', '46', '47', '0', '0.2', '0.4', '0.6', '0.8', '1', '12AM', '3AM', '6AM', '9AM', '12PM', '3PM', '6PM', '9PM', '12AM', '2', '4', '6', '8', '10'], 'title': 'Paris, France Weather History | Weather Underground'}
+[2026-04-03 12:28:47] [ERR] RuntimeError: No usable temperature SVG streams found. Candidate errors: idx=0 err=Cannot infer stream unit from tick values: [Decimal('47'), Decimal('46'), Decimal('45'), Decimal('44'), Decimal('43'), Decimal('42'), Decimal('41'), Decimal('40')] | debug={'lastPayload': {'candidates': [{'index': 0, 'leftBandMax': 140, 'pathD': 'M0,0L50,42.857142857142854L100,64.28571428571429L150,107.14285714285714L200,107.14285714285714L250,150L300,150L350,150L400,128.57142857142858L450,64.28571428571429L500,21.428571428571434', 'svgRect': {'bottom': 552.59375, 'height': 171.5, 'left': 169.3203125, 'right': 1400.6796875, 'top': 381.09375, 'width': 1231.359375}, 'yTicks': [{'text': '40', 'x': '2.6572265625', 'y': '171.3399658203125'}, {'text': '41', 'x': '2.5', 'y': '149.91143798828125'}, {'text': '42', 'x': '2.6572265625', 'y': '128.48284912109375'}, {'text': '43', 'x': '2.6572265625', 'y': '107.05429077148438'}, {'text': '44', 'x': '2.6572265625', 'y': '85.62571716308594'}, {'text': '45', 'x': '2.6572265625', 'y': '64.1971435546875'}, {'text': '46', 'x': '2.6572265625', 'y': '42.768585205078125'}, {'text': '47', 'x': '2.6572265625', 'y': '21.339996337890625'}, {'text': '1', 'x': '5.8359375', 'y': '198.34002685546875'}]}], 'jsError': None, 'noData': False, 'pageTitle': 'Paris, France Weather History | Weather Underground'}, 'pathCount': 1, 'tickTexts': ['12AM', '3AM', '6AM', '9AM', '12PM', '3PM', '6PM', '9PM', '12AM', '40', '41', '42', '43', '44', '45', '46', '47', '0', '0.2', '0.4', '0.6', '0.8', '1', '12AM', '3AM', '6AM', '9AM', '12PM', '3PM', '6PM', '9PM', '12AM', '2', '4', '6', '8', '10'], 'title': 'Paris, France Weather History | Weather Underground'}
+[2026-04-03 12:28:53] [ERR] RuntimeError: No usable temperature SVG streams found. Candidate errors: idx=0 err=Cannot infer stream unit from tick values: [Decimal('47'), Decimal('46'), Decimal('45'), Decimal('44'), Decimal('43'), Decimal('42'), Decimal('41'), Decimal('40')] | debug={'lastPayload': {'candidates': [{'index': 0, 'leftBandMax': 140, 'pathD': 'M0,0L50,42.857142857142854L100,64.28571428571429L150,107.14285714285714L200,107.14285714285714L250,150L300,150L350,150L400,128.57142857142858L450,64.28571428571429L500,21.428571428571434', 'svgRect': {'bottom': 552.59375, 'height': 171.5, 'left': 169.3203125, 'right': 1400.6796875, 'top': 381.09375, 'width': 1231.359375}, 'yTicks': [{'text': '40', 'x': '2.6572265625', 'y': '171.3399658203125'}, {'text': '41', 'x': '2.5', 'y': '149.91143798828125'}, {'text': '42', 'x': '2.6572265625', 'y': '128.48284912109375'}, {'text': '43', 'x': '2.6572265625', 'y': '107.05429077148438'}, {'text': '44', 'x': '2.6572265625', 'y': '85.62571716308594'}, {'text': '45', 'x': '2.6572265625', 'y': '64.1971435546875'}, {'text': '46', 'x': '2.6572265625', 'y': '42.768585205078125'}, {'text': '47', 'x': '2.6572265625', 'y': '21.339996337890625'}, {'text': '1', 'x': '5.8359375', 'y': '198.34002685546875'}]}], 'jsError': None, 'noData': False, 'pageTitle': 'Paris, France Weather History | Weather Underground'}, 'pathCount': 1, 'tickTexts': ['12AM', '3AM', '6AM', '9AM', '12PM', '3PM', '6PM', '9PM', '12AM', '40', '41', '42', '43', '44', '45', '46', '47', '0', '0.2', '0.4', '0.6', '0.8', '1', '12AM', '3AM', '6AM', '9AM', '12PM', '3PM', '6PM', '9PM', '12AM', '2', '4', '6', '8', '10'], 'title': 'Paris, France Weather History | Weather Underground'}
+[2026-04-03 12:35:41] [CFG] TARGET_PAGE_URL=https://www.wunderground.com/history/daily/fr/paris/LFPI/date/2026-4-3
+[2026-04-03 12:35:41] [CFG] LOCATION_ID=LFPI:9:FR (resolved from page API)
+[2026-04-03 12:35:41] [CFG] API_UNITS=m
+[2026-04-03 12:35:41] [CFG] HISTORY_DATE=20260403
+[2026-04-03 12:35:41] [CFG] CHECK_INTERVAL_SECONDS=5
+[2026-04-03 12:35:41] [CFG] SHOW_BROWSER_WINDOW=False
+[2026-04-03 12:35:41] [CFG] REBUILD_BROWSER_EVERY_N_POLLS=120
+[2026-04-03 12:35:41] [CFG] MATCH_TOLERANCE_C=0.001
+[2026-04-03 12:35:41] [CFG] MATCH_TOLERANCE_F=0.001
+[2026-04-03 12:35:41] [CFG] LOG_FILE_PATH=C:\Users\Dmytro Govor\Documents\Weather\weather_history_lag_diagnostic.log
+[2026-04-03 12:35:41] [CFG] JSONL_FILE_PATH=C:\Users\Dmytro Govor\Documents\Weather\weather_history_lag_diagnostic.jsonl
+[2026-04-03 12:35:42] [API_NEW] value=7.000°C temp_c=7.000°C temp_f=44.600°F valid_time_gmt=1775203200 (2026-04-03 08:00:00 UTC) obs_time_local= observations=11
+[2026-04-03 12:35:42] [BROWSER] Creating Chrome driver...
+[2026-04-03 12:35:55] [UI_WARN] C stream not found on this poll. Candidate errors: n/a
+[2026-04-03 12:35:55] [UI_NEW] stream=F unit_source=api_proximity value=46.000°F temp_c=7.778°C temp_f=46.000°F source=svg_temperature_line candidate_index=0 path_last=(500.000,21.429) y_scale_top=47.000@0.000 y_scale_bottom=40.000@150.000 points=11
+[2026-04-03 12:35:55] [DIFF] stream=F ui_value=46.000°F ui_temp_c=7.778°C ui_temp_f=46.000°F closest_unmatched_api_value=44.600°F delta=1.400°F state=WAITING_UI_OR_MISMATCH
+[2026-04-03 12:36:05] [UI_WARN] C stream not found on this poll. Candidate errors: n/a
+[2026-04-03 12:36:10] [API_NEW] value=10.000°C temp_c=10.000°C temp_f=50.000°F valid_time_gmt=1775206800 (2026-04-03 09:00:00 UTC) obs_time_local= observations=12
+[2026-04-03 12:36:10] [API_REPLACED_BEFORE_UI] stream=C pending_value=7.000°C pending_value_c=7.000°C pending_value_f=44.600°F api_obs_time_local= replaced_by_newer_api_before_ui_match=1
+[2026-04-03 12:36:10] [API_REPLACED_BEFORE_UI] stream=F pending_value=44.600°F pending_value_c=7.000°C pending_value_f=44.600°F api_obs_time_local= replaced_by_newer_api_before_ui_match=1
+[2026-04-03 12:36:12] [UI_WARN] C stream not found on this poll. Candidate errors: n/a
+[2026-04-03 12:36:19] [UI_WARN] C stream not found on this poll. Candidate errors: n/a
+[2026-04-03 12:36:26] [UI_WARN] C stream not found on this poll. Candidate errors: n/a
+[2026-04-03 12:36:34] [UI_WARN] C stream not found on this poll. Candidate errors: n/a
+[2026-04-03 12:36:41] [UI_WARN] C stream not found on this poll. Candidate errors: n/a
+[2026-04-03 12:36:48] [UI_WARN] C stream not found on this poll. Candidate errors: n/a
+[2026-04-03 12:36:56] [UI_WARN] C stream not found on this poll. Candidate errors: n/a
+[2026-04-03 12:37:03] [UI_WARN] C stream not found on this poll. Candidate errors: n/a
+[2026-04-03 12:37:09] [UI_WARN] C stream not found on this poll. Candidate errors: n/a
+[2026-04-03 12:37:17] [UI_WARN] C stream not found on this poll. Candidate errors: n/a
+[2026-04-03 12:37:35] [UI_WARN] C stream not found on this poll. Candidate errors: n/a
+[2026-04-03 12:37:42] [UI_WARN] C stream not found on this poll. Candidate errors: n/a
+[2026-04-03 12:37:50] [UI_WARN] C stream not found on this poll. Candidate errors: n/a
+[2026-04-03 12:37:57] [UI_WARN] C stream not found on this poll. Candidate errors: n/a
+[2026-04-03 12:38:05] [UI_WARN] C stream not found on this poll. Candidate errors: n/a
+[2026-04-03 12:38:11] [UI_WARN] C stream not found on this poll. Candidate errors: n/a
+[2026-04-03 12:38:18] [UI_WARN] C stream not found on this poll. Candidate errors: n/a
+[2026-04-03 12:38:26] [UI_WARN] C stream not found on this poll. Candidate errors: n/a
+[2026-04-03 12:38:33] [UI_WARN] C stream not found on this poll. Candidate errors: n/a
+[2026-04-03 12:38:40] [UI_WARN] C stream not found on this poll. Candidate errors: n/a

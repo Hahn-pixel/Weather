@@ -44,10 +44,9 @@ except Exception as exc:
 # CONFIG
 # =========================
 TARGET_PAGE_URL = "https://www.wunderground.com/history/daily/fr/paris/LFPI/date/2026-4-3"
-LOCATION_ID = None  # resolved from embedded page API when possible
+LOCATION_ID = None
 API_KEY = "e1f10a1e78da46f5b10a1e78da96f525"
-API_UNITS = "m"  # 'm' = Celsius, 'e' = Fahrenheit
-UI_RENDER_MODE = "AUTO"  # "AUTO", "C", or "F"
+API_UNITS = "m"  # 'm' = Celsius API, 'e' = Fahrenheit API
 CHECK_INTERVAL_SECONDS = 5
 REQUEST_TIMEOUT_SECONDS = 20
 VERIFY_TLS = True
@@ -65,6 +64,8 @@ USER_AGENT = (
     "Chrome/146.0.0.0 Safari/537.36"
 )
 REFERER = "https://www.wunderground.com/"
+MATCH_TOLERANCE_C = Decimal("0.001")
+MATCH_TOLERANCE_F = Decimal("0.001")
 
 
 # =========================
@@ -84,9 +85,9 @@ class ApiState:
 
 @dataclass
 class UiState:
+    stream_unit: str
+    unit_detection_source: str
     value_raw: Decimal
-    value_unit: str
-    render_mode: str
     value_c: Decimal
     value_f: Decimal
     source: str
@@ -98,10 +99,13 @@ class UiState:
     y_axis_bottom_value: Decimal
     path_point_count: int
     page_title: str
+    candidate_index: int
 
 
 @dataclass
 class PendingApiValue:
+    stream_unit: str
+    stream_value: Decimal
     value_c: Decimal
     value_f: Decimal
     first_seen_epoch: float
@@ -115,8 +119,8 @@ class PendingApiValue:
 @dataclass
 class MonitorMemory:
     last_api_identity: Optional[str] = None
-    last_ui_identity: Optional[str] = None
-    pending_by_c_key: Dict[str, PendingApiValue] = field(default_factory=dict)
+    last_ui_identity_by_stream: Dict[str, Optional[str]] = field(default_factory=lambda: {"C": None, "F": None})
+    pending_by_stream_key: Dict[str, Dict[str, PendingApiValue]] = field(default_factory=lambda: {"C": {}, "F": {}})
     poll_count: int = 0
 
 
@@ -170,12 +174,15 @@ def parse_decimal(value: Any, field_name: str) -> Decimal:
         raise RuntimeError(f"Invalid decimal for {field_name}: {value!r}") from exc
 
 
+
 def f_to_c_decimal(value_f: Decimal) -> Decimal:
     return (value_f - Decimal("32")) * Decimal("5") / Decimal("9")
 
 
+
 def c_to_f_decimal(value_c: Decimal) -> Decimal:
     return (value_c * Decimal("9") / Decimal("5")) + Decimal("32")
+
 
 
 def fmt_decimal(value: Decimal, places: int = 3) -> str:
@@ -183,12 +190,15 @@ def fmt_decimal(value: Decimal, places: int = 3) -> str:
     return f"{value.quantize(q):f}"
 
 
-def decimal_key_c(value_c: Decimal) -> str:
-    return fmt_decimal(value_c, 6)
+
+def decimal_key(value: Decimal) -> str:
+    return fmt_decimal(value, 6)
+
 
 
 def current_date_yyyymmdd() -> str:
     return datetime.now().strftime("%Y%m%d")
+
 
 
 def derive_history_date_from_url(url: str) -> str:
@@ -198,6 +208,7 @@ def derive_history_date_from_url(url: str) -> str:
     return f"{int(m.group(1)):04d}{int(m.group(2)):02d}{int(m.group(3)):02d}"
 
 
+
 def derive_location_id_from_url(url: str) -> str:
     m = re.search(r"/history/daily/([a-z]{2})/.+?/([A-Z0-9]{3,5})(?:/|$)", url, re.IGNORECASE)
     if not m:
@@ -205,6 +216,7 @@ def derive_location_id_from_url(url: str) -> str:
     country = m.group(1).upper()
     station = m.group(2).upper()
     return f"{station}:9:{country}"
+
 
 
 def resolve_location_id_from_page_api(session: requests.Session, page_url: str) -> str:
@@ -221,6 +233,7 @@ def resolve_location_id_from_page_api(session: requests.Session, page_url: str) 
         if m:
             return m.group(1)
     return derive_location_id_from_url(page_url)
+
 
 
 def epoch_to_utc_str(epoch_seconds: int) -> str:
@@ -246,8 +259,10 @@ def build_session() -> requests.Session:
     return session
 
 
+
 def historical_url(location_id: str) -> str:
     return f"https://api.weather.com/v1/location/{location_id}/observations/historical.json"
+
 
 
 def fetch_historical_json(session: requests.Session) -> Dict[str, Any]:
@@ -267,6 +282,7 @@ def fetch_historical_json(session: requests.Session) -> Dict[str, Any]:
     return response.json()
 
 
+
 def extract_api_state(data: Dict[str, Any]) -> ApiState:
     observations = data.get("observations")
     if not isinstance(observations, list) or not observations:
@@ -283,7 +299,7 @@ def extract_api_state(data: Dict[str, Any]) -> ApiState:
         value_c = f_to_c_decimal(raw_value)
     else:
         value_c = raw_value
-        value_f = c_to_f_decimal(raw_value)
+        value_f = c_to_f_decimal(value_c)
 
     valid_time_gmt = int(obs.get("valid_time_gmt") or 0)
     return ApiState(
@@ -296,6 +312,7 @@ def extract_api_state(data: Dict[str, Any]) -> ApiState:
         valid_time_gmt=valid_time_gmt,
         observation_count=len(observations),
     )
+
 
 
 def api_identity(state: ApiState) -> str:
@@ -323,6 +340,7 @@ def build_chrome_driver() -> webdriver.Chrome:
     return driver
 
 
+
 def close_driver_safely(driver: Optional[webdriver.Chrome]) -> None:
     if driver is None:
         return
@@ -332,17 +350,23 @@ def close_driver_safely(driver: Optional[webdriver.Chrome]) -> None:
         pass
 
 
+
 def wait_for_stable_temp_svg(driver: webdriver.Chrome) -> None:
     WebDriverWait(driver, SVG_WAIT_TIMEOUT_SECONDS).until(
         lambda d: d.execute_script(
-            "const p=document.querySelector('g.plot.temperature.line path'); return !!(p && p.getAttribute('d') && p.getAttribute('d').length > 10);"
+            "const ps=document.querySelectorAll('g.plot.temperature.line path'); return Array.from(ps).some(p => (p.getAttribute('d') || '').length > 10);"
         )
     )
-    d1 = str(driver.execute_script("const p=document.querySelector('g.plot.temperature.line path'); return p ? (p.getAttribute('d') || '') : '';"))
+    d1 = driver.execute_script(
+        "return Array.from(document.querySelectorAll('g.plot.temperature.line path')).map(p => p.getAttribute('d') || '');"
+    )
     time.sleep(0.35)
-    d2 = str(driver.execute_script("const p=document.querySelector('g.plot.temperature.line path'); return p ? (p.getAttribute('d') || '') : '';"))
-    if (not d1) or (not d2):
-        raise RuntimeError("Temperature SVG path disappeared during stabilization wait.")
+    d2 = driver.execute_script(
+        "return Array.from(document.querySelectorAll('g.plot.temperature.line path')).map(p => p.getAttribute('d') || '');"
+    )
+    if not d1 or not d2:
+        raise RuntimeError("Temperature SVG paths disappeared during stabilization wait.")
+
 
 
 def _extract_svg_payload(driver: webdriver.Chrome) -> Dict[str, Any]:
@@ -350,10 +374,7 @@ def _extract_svg_payload(driver: webdriver.Chrome) -> Dict[str, Any]:
 const result = {
   pageTitle: document.title || "",
   noData: false,
-  pathD: null,
-  yTicks: [],
-  svgRect: null,
-  leftBandMax: null,
+  candidates: [],
   jsError: null,
 };
 
@@ -365,64 +386,88 @@ try {
     result.noData = true;
   }
 
-  const tempPath = document.querySelector('g.plot.temperature.line path');
-  if (!tempPath) {
-    window.__dbg_last_payload = result;
-    return result;
-  }
-
-  result.pathD = tempPath.getAttribute('d');
-  const svg = tempPath.closest('svg');
-  if (!svg) {
-    window.__dbg_last_payload = result;
-    return result;
-  }
-
-  const svgRect = svg.getBoundingClientRect();
-  result.svgRect = {
-    left: svgRect.left,
-    right: svgRect.right,
-    top: svgRect.top,
-    bottom: svgRect.bottom,
-    width: svgRect.width,
-    height: svgRect.height,
-  };
-
-  const pathRect = tempPath.getBoundingClientRect();
-  const verticalMin = Math.min(svgRect.top, pathRect.top) - 30;
-  const verticalMax = Math.max(svgRect.bottom, pathRect.bottom) + 30;
-  const leftBandMax = svgRect.left + Math.min(140, Math.max(90, svgRect.width * 0.22));
-  result.leftBandMax = leftBandMax - svgRect.left;
-
-  const seen = new Set();
+  const paths = Array.from(document.querySelectorAll('g.plot.temperature.line path'));
   const allTextNodes = Array.from(document.querySelectorAll('text, svg text'));
-  for (const el of allTextNodes) {
-    const raw = (el.textContent || '').trim();
-    if (!raw) continue;
 
-    const norm = raw.replace(/°/g, '').replace(/−/g, '-').trim();
-    if (!/^[-+]?\d+(?:\.\d+)?$/.test(norm)) continue;
+  paths.forEach((tempPath, idx) => {
+    try {
+      const candidate = {
+        index: idx,
+        pathD: null,
+        yTicks: [],
+        svgRect: null,
+        leftBandMax: null,
+      };
 
-    const rect = el.getBoundingClientRect();
-    if (!rect || !isFinite(rect.left) || !isFinite(rect.top)) continue;
+      if (!tempPath) {
+        result.candidates.push(candidate);
+        return;
+      }
 
-    const centerX = rect.left + (rect.width / 2.0);
-    const centerY = rect.top + (rect.height / 2.0);
-    if (centerY < verticalMin || centerY > verticalMax) continue;
-    if (centerX > leftBandMax) continue;
+      candidate.pathD = tempPath.getAttribute('d');
+      const svg = tempPath.closest('svg');
+      if (!svg) {
+        result.candidates.push(candidate);
+        return;
+      }
 
-    const relX = centerX - svgRect.left;
-    const relY = centerY - svgRect.top;
-    const key = `${relX.toFixed(3)}|${relY.toFixed(3)}|${norm}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
+      const svgRect = svg.getBoundingClientRect();
+      candidate.svgRect = {
+        left: svgRect.left,
+        right: svgRect.right,
+        top: svgRect.top,
+        bottom: svgRect.bottom,
+        width: svgRect.width,
+        height: svgRect.height,
+      };
 
-    result.yTicks.push({
-      x: String(relX),
-      y: String(relY),
-      text: norm,
-    });
-  }
+      const pathRect = tempPath.getBoundingClientRect();
+      const verticalMin = Math.min(svgRect.top, pathRect.top) - 30;
+      const verticalMax = Math.max(svgRect.bottom, pathRect.bottom) + 30;
+      const leftBandMax = svgRect.left + Math.min(140, Math.max(90, svgRect.width * 0.22));
+      candidate.leftBandMax = leftBandMax - svgRect.left;
+
+      const seen = new Set();
+      for (const el of allTextNodes) {
+        const raw = (el.textContent || '').trim();
+        if (!raw) continue;
+
+        const norm = raw.replace(/°/g, '').replace(/−/g, '-').trim();
+        if (!/^[-+]?\d+(?:\.\d+)?$/.test(norm)) continue;
+
+        const rect = el.getBoundingClientRect();
+        if (!rect || !isFinite(rect.left) || !isFinite(rect.top)) continue;
+
+        const centerX = rect.left + (rect.width / 2.0);
+        const centerY = rect.top + (rect.height / 2.0);
+        if (centerY < verticalMin || centerY > verticalMax) continue;
+        if (centerX > leftBandMax) continue;
+
+        const relX = centerX - svgRect.left;
+        const relY = centerY - svgRect.top;
+        const key = `${relX.toFixed(3)}|${relY.toFixed(3)}|${norm}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        candidate.yTicks.push({
+          x: String(relX),
+          y: String(relY),
+          text: norm,
+        });
+      }
+
+      result.candidates.push(candidate);
+    } catch (errInner) {
+      result.candidates.push({
+        index: idx,
+        pathD: null,
+        yTicks: [],
+        svgRect: null,
+        leftBandMax: null,
+        innerError: String(errInner),
+      });
+    }
+  });
 } catch (err) {
   result.jsError = String(err);
 }
@@ -438,11 +483,13 @@ return result;
     return payload
 
 
+
 def _parse_path_points(path_d: str) -> List[Tuple[Decimal, Decimal]]:
     tokens = re.findall(r"[ML]\s*([-+]?\d*\.?\d+)\s*,\s*([-+]?\d*\.?\d+)", path_d)
     if not tokens:
         raise RuntimeError("Temperature path d=... contains no points.")
     return [(parse_decimal(x, "path.x"), parse_decimal(y, "path.y")) for x, y in tokens]
+
 
 
 def _score_tick_run(values: List[Tuple[Decimal, Decimal]], path_min_y: Decimal, path_max_y: Decimal) -> Tuple[int, Decimal, Decimal]:
@@ -456,6 +503,7 @@ def _score_tick_run(values: List[Tuple[Decimal, Decimal]], path_min_y: Decimal, 
     for idx in range(2, len(values)):
         step_penalty += abs((values[idx][1] - values[idx - 1][1]) - step_ref)
     return (len(values), -span_gap, -step_penalty)
+
 
 
 def _parse_y_ticks(ticks: List[Dict[str, Any]], path_points: List[Tuple[Decimal, Decimal]]) -> List[Tuple[Decimal, Decimal]]:
@@ -518,8 +566,8 @@ def _parse_y_ticks(ticks: List[Dict[str, Any]], path_points: List[Tuple[Decimal,
             else:
                 local_candidates.append(current_run[:])
                 current_run = [item]
-
         local_candidates.append(current_run[:])
+
         for candidate in local_candidates:
             score = _score_tick_run(candidate, path_min_y, path_max_y)
             if score > best_score:
@@ -531,35 +579,45 @@ def _parse_y_ticks(ticks: List[Dict[str, Any]], path_points: List[Tuple[Decimal,
     return best_run
 
 
-def _infer_ui_unit_from_ticks(tick_values: List[Decimal]) -> str:
+
+def _infer_unit_from_ticks_only(tick_values: List[Decimal]) -> Optional[str]:
     if not tick_values:
-        raise RuntimeError("Cannot infer UI unit: no tick values.")
-    return "F" if max(abs(v) for v in tick_values) > Decimal("55") else "C"
+        return None
+    max_abs = max(abs(v) for v in tick_values)
+    if max_abs >= Decimal("60"):
+        return "F"
+    if max_abs <= Decimal("35"):
+        return "C"
+    return None
 
 
-def _resolve_ui_render_mode(inferred_unit: str) -> str:
-    configured = str(UI_RENDER_MODE).strip().upper()
-    if configured not in {"AUTO", "C", "F"}:
-        raise RuntimeError(f"Invalid UI_RENDER_MODE: {UI_RENDER_MODE!r}")
-    if configured == "AUTO":
-        return inferred_unit
-    return configured
+
+def _choose_stream_unit(value_raw: Decimal, tick_values: List[Decimal], api_state: Optional[ApiState]) -> Tuple[str, str]:
+    by_ticks = _infer_unit_from_ticks_only(tick_values)
+    if by_ticks in {"C", "F"}:
+        return by_ticks, "tick_range"
+
+    if api_state is not None:
+        as_c_delta = abs(value_raw - api_state.value_c)
+        as_f_delta = abs(value_raw - api_state.value_f)
+        if as_f_delta < as_c_delta:
+            return "F", "api_proximity"
+        return "C", "api_proximity"
+
+    return "C", "fallback_default"
 
 
-def read_ui_state(driver: webdriver.Chrome) -> UiState:
-    driver.get(TARGET_PAGE_URL)
-    wait_for_stable_temp_svg(driver)
-    payload = _extract_svg_payload(driver)
 
-    if payload.get("noData") and not payload.get("pathD"):
-        raise RuntimeError("History UI shows 'No Data Recorded'.")
-
-    path_d = str(payload.get("pathD") or "").strip()
+def _build_ui_state_from_candidate(candidate: Dict[str, Any], page_title: str, api_state: Optional[ApiState]) -> UiState:
+    path_d = str(candidate.get("pathD") or "").strip()
     if not path_d:
-        raise RuntimeError("Temperature SVG path was not found.")
+        raise RuntimeError("Temperature SVG path was not found for candidate.")
 
     points = _parse_path_points(path_d)
-    ticks = _parse_y_ticks(payload.get("yTicks") or [], points)
+    ticks = _parse_y_ticks(candidate.get("yTicks") or [], points)
+
+    tick_values = [v for _, v in ticks]
+    stream_unit, unit_detection_source = _choose_stream_unit(tick_values[0], tick_values, api_state)
 
     tick_top_y, tick_top_value = ticks[0]
     tick_bottom_y, tick_bottom_value = ticks[-1]
@@ -573,20 +631,18 @@ def read_ui_state(driver: webdriver.Chrome) -> UiState:
     ratio = (last_y - path_top_y) / (path_bottom_y - path_top_y)
     value_raw = tick_top_value + (tick_bottom_value - tick_top_value) * ratio
 
-    inferred_unit = _infer_ui_unit_from_ticks([v for _, v in ticks])
-    render_mode = _resolve_ui_render_mode(inferred_unit)
-    value_unit = render_mode
-    if value_unit == "F":
+    stream_unit, unit_detection_source = _choose_stream_unit(value_raw, tick_values, api_state)
+    if stream_unit == "F":
         value_f = value_raw
-        value_c = f_to_c_decimal(value_raw)
+        value_c = f_to_c_decimal(value_f)
     else:
         value_c = value_raw
-        value_f = c_to_f_decimal(value_raw)
+        value_f = c_to_f_decimal(value_c)
 
     return UiState(
+        stream_unit=stream_unit,
+        unit_detection_source=unit_detection_source,
         value_raw=value_raw,
-        value_unit=value_unit,
-        render_mode=render_mode,
         value_c=value_c,
         value_f=value_f,
         source="svg_temperature_line",
@@ -597,41 +653,100 @@ def read_ui_state(driver: webdriver.Chrome) -> UiState:
         y_axis_top_value=tick_top_value,
         y_axis_bottom_value=tick_bottom_value,
         path_point_count=len(points),
-        page_title=str(payload.get("pageTitle") or ""),
+        page_title=page_title,
+        candidate_index=int(candidate.get("index") or 0),
     )
 
 
+
+def read_ui_states(driver: webdriver.Chrome, api_state: Optional[ApiState] = None) -> Dict[str, UiState]:
+    driver.get(TARGET_PAGE_URL)
+    wait_for_stable_temp_svg(driver)
+    payload = _extract_svg_payload(driver)
+
+    if payload.get("noData") and not payload.get("candidates"):
+        raise RuntimeError("History UI shows 'No Data Recorded'.")
+
+    page_title = str(payload.get("pageTitle") or "")
+    states: Dict[str, UiState] = {}
+    candidate_errors: List[str] = []
+
+    for candidate in payload.get("candidates") or []:
+        try:
+            state = _build_ui_state_from_candidate(candidate, page_title, api_state)
+        except Exception as exc:
+            candidate_errors.append(f"idx={candidate.get('index')} err={exc}")
+            continue
+        if state.stream_unit not in states:
+            states[state.stream_unit] = state
+
+    if not states:
+        raise RuntimeError(f"No usable temperature SVG streams found. Candidate errors: {' | '.join(candidate_errors)}")
+
+    if "C" not in states:
+        log("UI_WARN", f"C stream not found on this poll. Candidate errors: {' | '.join(candidate_errors) if candidate_errors else 'n/a'}")
+    if "F" not in states:
+        log("UI_WARN", f"F stream not found on this poll. Candidate errors: {' | '.join(candidate_errors) if candidate_errors else 'n/a'}")
+
+    return states
+
+
+
 def ui_identity(state: UiState) -> str:
-    return f"{state.render_mode}|{fmt_decimal(state.value_c, 6)}|{fmt_decimal(state.path_last_x, 6)}|{fmt_decimal(state.path_last_y, 6)}"
+    return (
+        f"{state.stream_unit}|{fmt_decimal(state.value_raw, 6)}|"
+        f"{fmt_decimal(state.path_last_x, 6)}|{fmt_decimal(state.path_last_y, 6)}"
+    )
 
 
 # =========================
 # MATCHER
 # =========================
+def _api_stream_value(api_state: ApiState, stream_unit: str) -> Decimal:
+    return api_state.value_c if stream_unit == "C" else api_state.value_f
+
+
+
+def _ui_stream_value(ui_state: UiState, stream_unit: str) -> Decimal:
+    return ui_state.value_c if stream_unit == "C" else ui_state.value_f
+
+
+
+def _stream_tolerance(stream_unit: str) -> Decimal:
+    return MATCH_TOLERANCE_C if stream_unit == "C" else MATCH_TOLERANCE_F
+
+
+
 def process_api_state(memory: MonitorMemory, state: ApiState) -> None:
     identity = api_identity(state)
     if identity == memory.last_api_identity:
         return
 
     memory.last_api_identity = identity
-    key = decimal_key_c(state.value_c)
     now_epoch = time.time()
-    existing = memory.pending_by_c_key.get(key)
-    if existing is None:
-        memory.pending_by_c_key[key] = PendingApiValue(
-            value_c=state.value_c,
-            value_f=state.value_f,
-            first_seen_epoch=now_epoch,
-            first_seen_wall=LOGGER.now_str(),
-            api_identity=identity,
-            obs_time_local=state.obs_time_local,
-            valid_time_gmt=state.valid_time_gmt,
-            matched=False,
-        )
-    else:
-        existing.api_identity = identity
-        existing.obs_time_local = state.obs_time_local
-        existing.valid_time_gmt = state.valid_time_gmt
+
+    for stream_unit in ("C", "F"):
+        stream_value = _api_stream_value(state, stream_unit)
+        key = decimal_key(stream_value)
+        bucket = memory.pending_by_stream_key[stream_unit]
+        existing = bucket.get(key)
+        if existing is None:
+            bucket[key] = PendingApiValue(
+                stream_unit=stream_unit,
+                stream_value=stream_value,
+                value_c=state.value_c,
+                value_f=state.value_f,
+                first_seen_epoch=now_epoch,
+                first_seen_wall=LOGGER.now_str(),
+                api_identity=identity,
+                obs_time_local=state.obs_time_local,
+                valid_time_gmt=state.valid_time_gmt,
+                matched=False,
+            )
+        else:
+            existing.api_identity = identity
+            existing.obs_time_local = state.obs_time_local
+            existing.valid_time_gmt = state.valid_time_gmt
 
     log(
         "API_NEW",
@@ -654,29 +769,31 @@ def process_api_state(memory: MonitorMemory, state: ApiState) -> None:
     )
 
 
+
 def process_ui_state(memory: MonitorMemory, state: UiState) -> None:
     identity = ui_identity(state)
-    if identity == memory.last_ui_identity:
+    if identity == memory.last_ui_identity_by_stream.get(state.stream_unit):
         return
 
-    memory.last_ui_identity = identity
+    memory.last_ui_identity_by_stream[state.stream_unit] = identity
     log(
         "UI_NEW",
         (
-            f"render_mode={state.render_mode} value={fmt_decimal(state.value_raw)}°{state.value_unit} "
+            f"stream={state.stream_unit} unit_source={state.unit_detection_source} value={fmt_decimal(state.value_raw)}°{state.stream_unit} "
             f"temp_c={fmt_decimal(state.value_c)}°C temp_f={fmt_decimal(state.value_f)}°F "
-            f"source={state.source} path_last=({fmt_decimal(state.path_last_x)},{fmt_decimal(state.path_last_y)}) "
+            f"source={state.source} candidate_index={state.candidate_index} "
+            f"path_last=({fmt_decimal(state.path_last_x)},{fmt_decimal(state.path_last_y)}) "
             f"y_scale_top={fmt_decimal(state.y_axis_top_value)}@{fmt_decimal(state.y_axis_top_y)} "
             f"y_scale_bottom={fmt_decimal(state.y_axis_bottom_value)}@{fmt_decimal(state.y_axis_bottom_y)} "
             f"points={state.path_point_count}"
         ),
         {
+            "stream_unit": state.stream_unit,
+            "unit_detection_source": state.unit_detection_source,
+            "value_raw": fmt_decimal(state.value_raw, 6),
             "value_c": fmt_decimal(state.value_c, 6),
             "value_f": fmt_decimal(state.value_f, 6),
-            "value_raw": fmt_decimal(state.value_raw, 6),
-            "value_unit": state.value_unit,
-            "render_mode": state.render_mode,
-            "source": state.source,
+            "candidate_index": state.candidate_index,
             "path_last_x": fmt_decimal(state.path_last_x, 6),
             "path_last_y": fmt_decimal(state.path_last_y, 6),
             "y_axis_top_value": fmt_decimal(state.y_axis_top_value, 6),
@@ -688,20 +805,28 @@ def process_ui_state(memory: MonitorMemory, state: UiState) -> None:
     evaluate_matches(memory, state)
 
 
+
 def evaluate_matches(memory: MonitorMemory, ui_state: UiState) -> None:
-    key = decimal_key_c(ui_state.value_c)
-    pending = memory.pending_by_c_key.get(key)
+    stream_unit = ui_state.stream_unit
+    ui_value = _ui_stream_value(ui_state, stream_unit)
+    bucket = memory.pending_by_stream_key[stream_unit]
+    exact_key = decimal_key(ui_value)
+    pending = bucket.get(exact_key)
+
     if pending is not None and not pending.matched:
         pending.matched = True
         lag_seconds = max(0.0, time.time() - pending.first_seen_epoch)
         log(
             "MATCH",
             (
-                f"value_c={fmt_decimal(ui_state.value_c)}°C value_f={fmt_decimal(ui_state.value_f)}°F "
+                f"stream={stream_unit} value={fmt_decimal(ui_value)}°{stream_unit} "
+                f"temp_c={fmt_decimal(ui_state.value_c)}°C temp_f={fmt_decimal(ui_state.value_f)}°F "
                 f"lag_seconds={lag_seconds:.1f} api_first_seen={pending.first_seen_wall} "
                 f"api_obs_time_local={pending.obs_time_local}"
             ),
             {
+                "stream_unit": stream_unit,
+                "stream_value": fmt_decimal(ui_value, 6),
                 "value_c": fmt_decimal(ui_state.value_c, 6),
                 "value_f": fmt_decimal(ui_state.value_f, 6),
                 "lag_seconds": round(lag_seconds, 3),
@@ -713,47 +838,59 @@ def evaluate_matches(memory: MonitorMemory, ui_state: UiState) -> None:
         )
         return
 
-    unmatched_values = [p for p in memory.pending_by_c_key.values() if not p.matched]
+    unmatched_values = [p for p in bucket.values() if not p.matched]
     if unmatched_values:
-        closest = min(unmatched_values, key=lambda p: abs(p.value_c - ui_state.value_c))
+        closest = min(unmatched_values, key=lambda p: abs(p.stream_value - ui_value))
+        delta = abs(closest.stream_value - ui_value)
+        state_label = "WITHIN_TOLERANCE" if delta <= _stream_tolerance(stream_unit) else "WAITING_UI_OR_MISMATCH"
         log(
             "DIFF",
             (
+                f"stream={stream_unit} ui_value={fmt_decimal(ui_value)}°{stream_unit} "
                 f"ui_temp_c={fmt_decimal(ui_state.value_c)}°C ui_temp_f={fmt_decimal(ui_state.value_f)}°F "
-                f"closest_unmatched_api_c={fmt_decimal(closest.value_c)}°C "
-                f"delta_c={fmt_decimal(abs(closest.value_c - ui_state.value_c))}°C state=WAITING_UI_OR_MISMATCH"
+                f"closest_unmatched_api_value={fmt_decimal(closest.stream_value)}°{stream_unit} "
+                f"delta={fmt_decimal(delta)}°{stream_unit} state={state_label}"
             ),
             {
-                "ui_value_c": fmt_decimal(ui_state.value_c, 6),
-                "ui_value_f": fmt_decimal(ui_state.value_f, 6),
-                "closest_unmatched_api_value_c": fmt_decimal(closest.value_c, 6),
-                "delta_c": fmt_decimal(abs(closest.value_c - ui_state.value_c), 6),
+                "stream_unit": stream_unit,
+                "ui_stream_value": fmt_decimal(ui_value, 6),
+                "closest_unmatched_api_stream_value": fmt_decimal(closest.stream_value, 6),
+                "delta": fmt_decimal(delta, 6),
+                "state": state_label,
             },
         )
 
 
-def sweep_unmatched_api(memory: MonitorMemory, newest_api_value_c: Decimal) -> None:
-    to_remove: List[str] = []
-    for key, pending in memory.pending_by_c_key.items():
-        if pending.matched:
-            continue
-        if pending.value_c != newest_api_value_c:
-            log(
-                "API_REPLACED_BEFORE_UI",
-                (
-                    f"pending_value_c={fmt_decimal(pending.value_c)}°C pending_value_f={fmt_decimal(pending.value_f)}°F "
-                    f"api_obs_time_local={pending.obs_time_local} replaced_by_newer_api_before_ui_match=1"
-                ),
-                {
-                    "pending_value_c": fmt_decimal(pending.value_c, 6),
-                    "pending_value_f": fmt_decimal(pending.value_f, 6),
-                    "api_obs_time_local": pending.obs_time_local,
-                    "api_identity": pending.api_identity,
-                },
-            )
-            to_remove.append(key)
-    for key in to_remove:
-        memory.pending_by_c_key.pop(key, None)
+
+def sweep_unmatched_api(memory: MonitorMemory, newest_api_state: ApiState) -> None:
+    for stream_unit in ("C", "F"):
+        newest_stream_value = _api_stream_value(newest_api_state, stream_unit)
+        newest_key = decimal_key(newest_stream_value)
+        bucket = memory.pending_by_stream_key[stream_unit]
+        to_remove: List[str] = []
+        for key, pending in bucket.items():
+            if pending.matched:
+                continue
+            if key != newest_key:
+                log(
+                    "API_REPLACED_BEFORE_UI",
+                    (
+                        f"stream={stream_unit} pending_value={fmt_decimal(pending.stream_value)}°{stream_unit} "
+                        f"pending_value_c={fmt_decimal(pending.value_c)}°C pending_value_f={fmt_decimal(pending.value_f)}°F "
+                        f"api_obs_time_local={pending.obs_time_local} replaced_by_newer_api_before_ui_match=1"
+                    ),
+                    {
+                        "stream_unit": stream_unit,
+                        "pending_stream_value": fmt_decimal(pending.stream_value, 6),
+                        "pending_value_c": fmt_decimal(pending.value_c, 6),
+                        "pending_value_f": fmt_decimal(pending.value_f, 6),
+                        "api_obs_time_local": pending.obs_time_local,
+                        "api_identity": pending.api_identity,
+                    },
+                )
+                to_remove.append(key)
+        for key in to_remove:
+            bucket.pop(key, None)
 
 
 # =========================
@@ -776,7 +913,8 @@ def main() -> int:
     log("CFG", f"CHECK_INTERVAL_SECONDS={CHECK_INTERVAL_SECONDS}")
     log("CFG", f"SHOW_BROWSER_WINDOW={SHOW_BROWSER_WINDOW}")
     log("CFG", f"REBUILD_BROWSER_EVERY_N_POLLS={REBUILD_BROWSER_EVERY_N_POLLS}")
-    log("CFG", f"UI_RENDER_MODE={UI_RENDER_MODE}")
+    log("CFG", f"MATCH_TOLERANCE_C={MATCH_TOLERANCE_C}")
+    log("CFG", f"MATCH_TOLERANCE_F={MATCH_TOLERANCE_F}")
     if LOG_TO_FILE:
         log("CFG", f"LOG_FILE_PATH={LOGGER.text_path}")
     if WRITE_JSONL_EVENTS:
@@ -789,14 +927,17 @@ def main() -> int:
                 api_json = fetch_historical_json(session)
                 api_state = extract_api_state(api_json)
                 process_api_state(memory, api_state)
-                sweep_unmatched_api(memory, api_state.value_c)
+                sweep_unmatched_api(memory, api_state)
 
                 if driver is None:
                     log("BROWSER", "Creating Chrome driver...")
                     driver = build_chrome_driver()
 
-                ui_state = read_ui_state(driver)
-                process_ui_state(memory, ui_state)
+                ui_states = read_ui_states(driver, api_state)
+                for stream_unit in ("C", "F"):
+                    state = ui_states.get(stream_unit)
+                    if state is not None:
+                        process_ui_state(memory, state)
 
                 if REBUILD_BROWSER_EVERY_N_POLLS > 0 and memory.poll_count % REBUILD_BROWSER_EVERY_N_POLLS == 0:
                     log("BROWSER", f"Rebuilding browser after {REBUILD_BROWSER_EVERY_N_POLLS} polls.")
@@ -823,10 +964,15 @@ def main() -> int:
                 driver = None
 
             except (RuntimeError, TimeoutException, requests.RequestException) as exc:
-                if isinstance(exc, RuntimeError) and ("Not enough Y-axis ticks" in str(exc) or "SVG JS extraction failed" in str(exc) or "Temperature SVG path" in str(exc)):
+                if isinstance(exc, RuntimeError) and (
+                    "Not enough Y-axis ticks" in str(exc)
+                    or "SVG JS extraction failed" in str(exc)
+                    or "Temperature SVG path" in str(exc)
+                    or "No usable temperature SVG streams found" in str(exc)
+                ):
                     try:
                         dbg = driver.execute_script(
-                            "return {title: document.title || '', lastPayload: window.__dbg_last_payload || null, tickTexts: Array.from(document.querySelectorAll('text, svg text')).map(x => (x.textContent || '').trim()).filter(Boolean).slice(0, 120), hasPath: !!document.querySelector('g.plot.temperature.line path')};"
+                            "return {title: document.title || '', lastPayload: window.__dbg_last_payload || null, tickTexts: Array.from(document.querySelectorAll('text, svg text')).map(x => (x.textContent || '').trim()).filter(Boolean).slice(0, 160), pathCount: document.querySelectorAll('g.plot.temperature.line path').length};"
                         ) if driver is not None else {}
                     except Exception:
                         dbg = {}
