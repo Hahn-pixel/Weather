@@ -1,0 +1,16 @@
+[2026-04-03 11:38:38] [CFG] TARGET_PAGE_URL=https://www.wunderground.com/history/daily/fr/paris/LFPI/date/2026-4-3
+[2026-04-03 11:38:38] [CFG] LOCATION_ID=LFPI:9:FR (resolved from page API)
+[2026-04-03 11:38:38] [CFG] API_UNITS=m
+[2026-04-03 11:38:38] [CFG] HISTORY_DATE=20260403
+[2026-04-03 11:38:38] [CFG] CHECK_INTERVAL_SECONDS=5
+[2026-04-03 11:38:38] [CFG] SHOW_BROWSER_WINDOW=False
+[2026-04-03 11:38:38] [CFG] REBUILD_BROWSER_EVERY_N_POLLS=120
+[2026-04-03 11:38:38] [CFG] UI_RENDER_MODE=AUTO
+[2026-04-03 11:38:38] [CFG] LOG_FILE_PATH=C:\Users\Dmytro Govor\Documents\Weather\weather_history_lag_diagnostic.log
+[2026-04-03 11:38:38] [CFG] JSONL_FILE_PATH=C:\Users\Dmytro Govor\Documents\Weather\weather_history_lag_diagnostic.jsonl
+[2026-04-03 11:38:39] [API_NEW] value=7.000°C temp_c=7.000°C temp_f=44.600°F valid_time_gmt=1775203200 (2026-04-03 08:00:00 UTC) obs_time_local= observations=11
+[2026-04-03 11:38:39] [BROWSER] Creating Chrome driver...
+[2026-04-03 11:39:24] [BROWSER_RESET] TimeoutException: webdriver failure; recreating driver
+[2026-04-03 11:39:32] [BROWSER] Creating Chrome driver...
+[2026-04-03 11:39:54] [UI_NEW] render_mode=C value=46.000°C temp_c=46.000°C temp_f=114.800°F source=svg_temperature_line path_last=(500.000,21.429) y_scale_top=47.000@0.000 y_scale_bottom=40.000@150.000 points=11
+[2026-04-03 11:39:54] [DIFF] ui_temp_c=46.000°C ui_temp_f=114.800°F closest_unmatched_api_c=7.000°C delta_c=39.000°C state=WAITING_UI_OR_MISMATCH

@@ -23,11 +23,14 @@ except Exception as exc:
 
 try:
     from selenium import webdriver
-    from selenium.common.exceptions import InvalidSessionIdException, TimeoutException, WebDriverException
+    from selenium.common.exceptions import (
+        InvalidSessionIdException,
+        JavascriptException,
+        TimeoutException,
+        WebDriverException,
+    )
     from selenium.webdriver.chrome.options import Options
     from selenium.webdriver.chrome.service import Service
-    from selenium.webdriver.common.by import By
-    from selenium.webdriver.support import expected_conditions as EC
     from selenium.webdriver.support.ui import WebDriverWait
 except Exception as exc:
     print(f"[FATAL] Failed to import selenium: {exc}", flush=True)
@@ -41,16 +44,16 @@ except Exception as exc:
 # CONFIG
 # =========================
 TARGET_PAGE_URL = "https://www.wunderground.com/history/daily/fr/paris/LFPI/date/2026-4-3"
-LOCATION_ID = None  # auto-detected from TARGET_PAGE_URL
+LOCATION_ID = None  # resolved from embedded page API when possible
 API_KEY = "e1f10a1e78da46f5b10a1e78da96f525"
 API_UNITS = "m"  # 'm' = Celsius, 'e' = Fahrenheit
+UI_RENDER_MODE = "AUTO"  # "AUTO", "C", or "F"
 CHECK_INTERVAL_SECONDS = 5
 REQUEST_TIMEOUT_SECONDS = 20
 VERIFY_TLS = True
 SHOW_BROWSER_WINDOW = False
-UI_RENDER_MODE = "AUTO"  # "AUTO", "C", or "F"
 PAGE_LOAD_TIMEOUT_SECONDS = 40
-SVG_WAIT_TIMEOUT_SECONDS = 20
+SVG_WAIT_TIMEOUT_SECONDS = 25
 REBUILD_BROWSER_EVERY_N_POLLS = 120
 LOG_TO_FILE = True
 LOG_FILE_PATH = "weather_history_lag_diagnostic.log"
@@ -62,47 +65,6 @@ USER_AGENT = (
     "Chrome/146.0.0.0 Safari/537.36"
 )
 REFERER = "https://www.wunderground.com/"
-
-
-# =========================
-# URL → LOCATION_ID RESOLUTION
-# =========================
-
-def derive_location_id_from_url(url: str) -> str:
-    m = re.search(r"/history/daily/([a-z]{2})/.+?/([A-Z0-9]{3,5})(?:/|$)", url, re.IGNORECASE)
-    if not m:
-        raise RuntimeError(f"Cannot derive station from URL: {url}")
-    country = m.group(1).upper()
-    station = m.group(2).upper()
-    return f"{station}:9:{country}"
-
-
-def derive_history_date_from_url(url: str) -> str:
-    m = re.search(r"/date/(\d{4})-(\d{1,2})-(\d{1,2})(?:/|$)", url, re.IGNORECASE)
-    if not m:
-        return current_date_yyyymmdd()
-    year = int(m.group(1))
-    month = int(m.group(2))
-    day = int(m.group(3))
-    return f"{year:04d}{month:02d}{day:02d}"
-
-
-def resolve_location_id_from_page_api(session: requests.Session, page_url: str) -> str:
-    response = session.get(page_url, timeout=REQUEST_TIMEOUT_SECONDS, verify=VERIFY_TLS)
-    response.raise_for_status()
-    html = response.text
-
-    patterns = [
-        r"/v1/location/([^/]+)/observations/historical\.json",
-        r"https://api\.weather\.com/v1/location/([^/]+)/observations/historical\.json",
-        r'"locationKey"\s*:\s*"([^"]+)"',
-    ]
-    for pattern in patterns:
-        m = re.search(pattern, html, re.IGNORECASE)
-        if m:
-            return m.group(1)
-
-    return derive_location_id_from_url(page_url)
 
 
 # =========================
@@ -221,12 +183,44 @@ def fmt_decimal(value: Decimal, places: int = 3) -> str:
     return f"{value.quantize(q):f}"
 
 
+def decimal_key_c(value_c: Decimal) -> str:
+    return fmt_decimal(value_c, 6)
+
+
 def current_date_yyyymmdd() -> str:
     return datetime.now().strftime("%Y%m%d")
 
 
-def decimal_key_c(value_c: Decimal) -> str:
-    return fmt_decimal(value_c, 6)
+def derive_history_date_from_url(url: str) -> str:
+    m = re.search(r"/date/(\d{4})-(\d{1,2})-(\d{1,2})(?:/|$)", url, re.IGNORECASE)
+    if not m:
+        return current_date_yyyymmdd()
+    return f"{int(m.group(1)):04d}{int(m.group(2)):02d}{int(m.group(3)):02d}"
+
+
+def derive_location_id_from_url(url: str) -> str:
+    m = re.search(r"/history/daily/([a-z]{2})/.+?/([A-Z0-9]{3,5})(?:/|$)", url, re.IGNORECASE)
+    if not m:
+        raise RuntimeError(f"Cannot derive station from URL: {url}")
+    country = m.group(1).upper()
+    station = m.group(2).upper()
+    return f"{station}:9:{country}"
+
+
+def resolve_location_id_from_page_api(session: requests.Session, page_url: str) -> str:
+    response = session.get(page_url, timeout=REQUEST_TIMEOUT_SECONDS, verify=VERIFY_TLS)
+    response.raise_for_status()
+    html = response.text
+    patterns = [
+        r"/v1/location/([^/]+)/observations/historical\.json",
+        r"https://api\.weather\.com/v1/location/([^/]+)/observations/historical\.json",
+        r'"locationKey"\s*:\s*"([^"]+)"',
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, html, re.IGNORECASE)
+        if m:
+            return m.group(1)
+    return derive_location_id_from_url(page_url)
 
 
 def epoch_to_utc_str(epoch_seconds: int) -> str:
@@ -258,15 +252,14 @@ def historical_url(location_id: str) -> str:
 
 def fetch_historical_json(session: requests.Session) -> Dict[str, Any]:
     date_key = derive_history_date_from_url(TARGET_PAGE_URL)
-    params = {
-        "apiKey": API_KEY,
-        "units": API_UNITS,
-        "startDate": date_key,
-        "endDate": date_key,
-    }
     response = session.get(
         historical_url(LOCATION_ID),
-        params=params,
+        params={
+            "apiKey": API_KEY,
+            "units": API_UNITS,
+            "startDate": date_key,
+            "endDate": date_key,
+        },
         timeout=REQUEST_TIMEOUT_SECONDS,
         verify=VERIFY_TLS,
     )
@@ -319,10 +312,13 @@ def build_chrome_driver() -> webdriver.Chrome:
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--no-sandbox")
     options.add_argument("--window-size=1600,1200")
+    options.add_argument("--disable-background-timer-throttling")
+    options.add_argument("--disable-backgrounding-occluded-windows")
+    options.add_argument("--disable-renderer-backgrounding")
+    options.add_argument("--disable-features=PaintHolding")
     if not SHOW_BROWSER_WINDOW:
         options.add_argument("--headless=new")
-    service = Service()
-    driver = webdriver.Chrome(service=service, options=options)
+    driver = webdriver.Chrome(service=Service(), options=options)
     driver.set_page_load_timeout(PAGE_LOAD_TIMEOUT_SECONDS)
     return driver
 
@@ -336,6 +332,19 @@ def close_driver_safely(driver: Optional[webdriver.Chrome]) -> None:
         pass
 
 
+def wait_for_stable_temp_svg(driver: webdriver.Chrome) -> None:
+    WebDriverWait(driver, SVG_WAIT_TIMEOUT_SECONDS).until(
+        lambda d: d.execute_script(
+            "const p=document.querySelector('g.plot.temperature.line path'); return !!(p && p.getAttribute('d') && p.getAttribute('d').length > 10);"
+        )
+    )
+    d1 = str(driver.execute_script("const p=document.querySelector('g.plot.temperature.line path'); return p ? (p.getAttribute('d') || '') : '';"))
+    time.sleep(0.35)
+    d2 = str(driver.execute_script("const p=document.querySelector('g.plot.temperature.line path'); return p ? (p.getAttribute('d') || '') : '';"))
+    if (not d1) or (not d2):
+        raise RuntimeError("Temperature SVG path disappeared during stabilization wait.")
+
+
 def _extract_svg_payload(driver: webdriver.Chrome) -> Dict[str, Any]:
     script = r'''
 const result = {
@@ -343,68 +352,89 @@ const result = {
   noData: false,
   pathD: null,
   yTicks: [],
+  svgRect: null,
+  leftBandMax: null,
+  jsError: null,
 };
 
-const noDataEl = Array.from(document.querySelectorAll('*')).find(el => {
-  const txt = (el.textContent || '').trim();
-  return txt === 'No Data Recorded';
-});
-if (noDataEl) {
-  result.noData = true;
-}
-
-const pathCandidates = Array.from(document.querySelectorAll('g.plot.temperature.line path, svg path'));
-const lineCandidate = pathCandidates.find(el => {
-  const d = (el.getAttribute('d') || '').trim();
-  return d.startsWith('M') && d.includes('L');
-});
-if (lineCandidate) {
-  result.pathD = lineCandidate.getAttribute('d');
-}
-
-const result = {
-  pageTitle: document.title || "",
-  noData: false,
-  pathD: null,
-  yTicks: [],
-};
-
-const noDataEl = Array.from(document.querySelectorAll('*')).find(el => {
-  const txt = (el.textContent || '').trim();
-  return txt === 'No Data Recorded';
-});
-if (noDataEl) {
-  result.noData = true;
-}
-
-const pathCandidates = Array.from(document.querySelectorAll('g.plot.temperature.line path, svg path'));
-const lineCandidate = pathCandidates.find(el => {
-  const d = (el.getAttribute('d') || '').trim();
-  return d.startsWith('M') && d.includes('L');
-});
-if (lineCandidate) {
-  result.pathD = lineCandidate.getAttribute('d');
-  const svg = lineCandidate.closest('svg');
-  if (svg) {
-    const seen = new Set();
-    for (const el of Array.from(svg.querySelectorAll('text'))) {
-      const text = (el.textContent || '').trim();
-      const y = el.getAttribute('y');
-      const x = el.getAttribute('x');
-      if (!text || y === null) continue;
-      const key = `${x}|${y}|${text}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      result.yTicks.push({x, y, text});
-    }
+try {
+  const noDataEl = Array.from(document.querySelectorAll('*')).find(
+    el => (el.textContent || '').trim() === 'No Data Recorded'
+  );
+  if (noDataEl) {
+    result.noData = true;
   }
+
+  const tempPath = document.querySelector('g.plot.temperature.line path');
+  if (!tempPath) {
+    window.__dbg_last_payload = result;
+    return result;
+  }
+
+  result.pathD = tempPath.getAttribute('d');
+  const svg = tempPath.closest('svg');
+  if (!svg) {
+    window.__dbg_last_payload = result;
+    return result;
+  }
+
+  const svgRect = svg.getBoundingClientRect();
+  result.svgRect = {
+    left: svgRect.left,
+    right: svgRect.right,
+    top: svgRect.top,
+    bottom: svgRect.bottom,
+    width: svgRect.width,
+    height: svgRect.height,
+  };
+
+  const pathRect = tempPath.getBoundingClientRect();
+  const verticalMin = Math.min(svgRect.top, pathRect.top) - 30;
+  const verticalMax = Math.max(svgRect.bottom, pathRect.bottom) + 30;
+  const leftBandMax = svgRect.left + Math.min(140, Math.max(90, svgRect.width * 0.22));
+  result.leftBandMax = leftBandMax - svgRect.left;
+
+  const seen = new Set();
+  const allTextNodes = Array.from(document.querySelectorAll('text, svg text'));
+  for (const el of allTextNodes) {
+    const raw = (el.textContent || '').trim();
+    if (!raw) continue;
+
+    const norm = raw.replace(/°/g, '').replace(/−/g, '-').trim();
+    if (!/^[-+]?\d+(?:\.\d+)?$/.test(norm)) continue;
+
+    const rect = el.getBoundingClientRect();
+    if (!rect || !isFinite(rect.left) || !isFinite(rect.top)) continue;
+
+    const centerX = rect.left + (rect.width / 2.0);
+    const centerY = rect.top + (rect.height / 2.0);
+    if (centerY < verticalMin || centerY > verticalMax) continue;
+    if (centerX > leftBandMax) continue;
+
+    const relX = centerX - svgRect.left;
+    const relY = centerY - svgRect.top;
+    const key = `${relX.toFixed(3)}|${relY.toFixed(3)}|${norm}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    result.yTicks.push({
+      x: String(relX),
+      y: String(relY),
+      text: norm,
+    });
+  }
+} catch (err) {
+  result.jsError = String(err);
 }
 
+window.__dbg_last_payload = result;
 return result;
 '''
     payload = driver.execute_script(script)
     if not isinstance(payload, dict):
         raise RuntimeError("Unexpected JS payload for SVG extraction.")
+    if payload.get("jsError"):
+        raise RuntimeError(f"SVG JS extraction failed: {payload.get('jsError')}")
     return payload
 
 
@@ -412,79 +442,99 @@ def _parse_path_points(path_d: str) -> List[Tuple[Decimal, Decimal]]:
     tokens = re.findall(r"[ML]\s*([-+]?\d*\.?\d+)\s*,\s*([-+]?\d*\.?\d+)", path_d)
     if not tokens:
         raise RuntimeError("Temperature path d=... contains no points.")
-    points: List[Tuple[Decimal, Decimal]] = []
-    for x_str, y_str in tokens:
-        points.append((parse_decimal(x_str, "path.x"), parse_decimal(y_str, "path.y")))
-    return points
+    return [(parse_decimal(x, "path.x"), parse_decimal(y, "path.y")) for x, y in tokens]
 
 
-def _parse_y_ticks(ticks: List[Dict[str, Any]]) -> List[Tuple[Decimal, Decimal]]:
-    parsed: List[Tuple[Decimal, Decimal]] = []
+def _score_tick_run(values: List[Tuple[Decimal, Decimal]], path_min_y: Decimal, path_max_y: Decimal) -> Tuple[int, Decimal, Decimal]:
+    if len(values) < 2:
+        return (-1, Decimal("999999"), Decimal("999999"))
+    y_span = values[-1][0] - values[0][0]
+    path_span = path_max_y - path_min_y
+    span_gap = abs(y_span - path_span)
+    step_ref = values[1][1] - values[0][1]
+    step_penalty = Decimal("0")
+    for idx in range(2, len(values)):
+        step_penalty += abs((values[idx][1] - values[idx - 1][1]) - step_ref)
+    return (len(values), -span_gap, -step_penalty)
+
+
+def _parse_y_ticks(ticks: List[Dict[str, Any]], path_points: List[Tuple[Decimal, Decimal]]) -> List[Tuple[Decimal, Decimal]]:
+    parsed: List[Tuple[Decimal, Decimal, Decimal]] = []
     for item in ticks:
         if not isinstance(item, dict):
             continue
-        text = str(item.get("text") or "").strip()
-        y = item.get("y")
-        if not text:
-            continue
-        normalized = text.replace("°", "").replace("−", "-").strip()
-        if not re.fullmatch(r"[-+]?\d+(?:\.\d+)?", normalized):
-            continue
         try:
-            label_value = parse_decimal(normalized, "tick.text")
-            label_y = parse_decimal(y, "tick.y")
+            label_x = parse_decimal(item.get("x"), "tick.x")
+            label_y = parse_decimal(item.get("y"), "tick.y")
+            label_value = parse_decimal(item.get("text"), "tick.text")
         except Exception:
             continue
-        parsed.append((label_y, label_value))
+        parsed.append((label_x, label_y, label_value))
 
-    parsed.sort(key=lambda pair: pair[0])
+    if len(parsed) < 2:
+        raise RuntimeError(f"Not enough Y-axis ticks to reconstruct temperature. Parsed ticks={parsed!r}")
 
-    deduped: List[Tuple[Decimal, Decimal]] = []
-    seen_pairs = set()
-    for item in parsed:
-        key = (str(item[0]), str(item[1]))
-        if key in seen_pairs:
-            continue
-        seen_pairs.add(key)
-        deduped.append(item)
+    path_ys = [y for _, y in path_points]
+    path_min_y = min(path_ys)
+    path_max_y = max(path_ys)
 
-    if len(deduped) < 2:
-        raise RuntimeError(f"Not enough Y-axis ticks to reconstruct temperature. Parsed ticks={deduped!r}")
+    clusters: Dict[str, List[Tuple[Decimal, Decimal]]] = {}
+    for label_x, label_y, label_value in parsed:
+        bucket = str(int(label_x / Decimal("20")))
+        clusters.setdefault(bucket, []).append((label_y, label_value))
 
     best_run: List[Tuple[Decimal, Decimal]] = []
-    current_run: List[Tuple[Decimal, Decimal]] = [deduped[0]]
-    for item in deduped[1:]:
-        prev_y, prev_value = current_run[-1]
-        curr_y, curr_value = item
-        if curr_y > prev_y and curr_value != prev_value:
-            if len(current_run) < 2:
-                current_run.append(item)
-            else:
-                prev_step = current_run[-1][1] - current_run[-2][1]
-                curr_step = curr_value - prev_value
-                if curr_step == prev_step:
+    best_score: Tuple[int, Decimal, Decimal] = (-1, Decimal("-999999"), Decimal("-999999"))
+    for values in clusters.values():
+        values.sort(key=lambda pair: pair[0])
+        deduped: List[Tuple[Decimal, Decimal]] = []
+        seen = set()
+        for item in values:
+            key = (str(item[0]), str(item[1]))
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(item)
+
+        if len(deduped) < 2:
+            continue
+
+        current_run: List[Tuple[Decimal, Decimal]] = [deduped[0]]
+        local_candidates: List[List[Tuple[Decimal, Decimal]]] = []
+        for item in deduped[1:]:
+            prev_y, prev_value = current_run[-1]
+            curr_y, curr_value = item
+            if curr_y > prev_y and curr_value != prev_value:
+                if len(current_run) < 2:
                     current_run.append(item)
                 else:
-                    if len(current_run) > len(best_run):
-                        best_run = current_run[:]
-                    current_run = [current_run[-1], item]
-        else:
-            if len(current_run) > len(best_run):
-                best_run = current_run[:]
-            current_run = [item]
-    if len(current_run) > len(best_run):
-        best_run = current_run[:]
+                    prev_step = current_run[-1][1] - current_run[-2][1]
+                    curr_step = curr_value - prev_value
+                    if curr_step == prev_step:
+                        current_run.append(item)
+                    else:
+                        local_candidates.append(current_run[:])
+                        current_run = [current_run[-1], item]
+            else:
+                local_candidates.append(current_run[:])
+                current_run = [item]
 
-    if len(best_run) >= 2:
-        return best_run
-    return deduped
+        local_candidates.append(current_run[:])
+        for candidate in local_candidates:
+            score = _score_tick_run(candidate, path_min_y, path_max_y)
+            if score > best_score:
+                best_score = score
+                best_run = candidate[:]
+
+    if len(best_run) < 2:
+        raise RuntimeError(f"Not enough Y-axis ticks to reconstruct temperature. Parsed ticks={parsed!r}")
+    return best_run
 
 
 def _infer_ui_unit_from_ticks(tick_values: List[Decimal]) -> str:
     if not tick_values:
         raise RuntimeError("Cannot infer UI unit: no tick values.")
-    max_abs = max(abs(v) for v in tick_values)
-    return "F" if max_abs > Decimal("55") else "C"
+    return "F" if max(abs(v) for v in tick_values) > Decimal("55") else "C"
 
 
 def _resolve_ui_render_mode(inferred_unit: str) -> str:
@@ -498,16 +548,9 @@ def _resolve_ui_render_mode(inferred_unit: str) -> str:
 
 def read_ui_state(driver: webdriver.Chrome) -> UiState:
     driver.get(TARGET_PAGE_URL)
-    WebDriverWait(driver, SVG_WAIT_TIMEOUT_SECONDS).until(
-        lambda d: d.execute_script(
-            """
-            const p = document.querySelector('g.plot.temperature.line path');
-            return p && p.getAttribute('d') && p.getAttribute('d').length > 10;
-            """
-        )
-    )
-
+    wait_for_stable_temp_svg(driver)
     payload = _extract_svg_payload(driver)
+
     if payload.get("noData") and not payload.get("pathD"):
         raise RuntimeError("History UI shows 'No Data Recorded'.")
 
@@ -516,19 +559,21 @@ def read_ui_state(driver: webdriver.Chrome) -> UiState:
         raise RuntimeError("Temperature SVG path was not found.")
 
     points = _parse_path_points(path_d)
-    ticks = _parse_y_ticks(payload.get("yTicks") or [])
+    ticks = _parse_y_ticks(payload.get("yTicks") or [], points)
 
-    top_y, top_value = ticks[0]
-    bottom_y, bottom_value = ticks[-1]
-    if bottom_y == top_y:
-        raise RuntimeError("Y-axis tick range is degenerate.")
+    tick_top_y, tick_top_value = ticks[0]
+    tick_bottom_y, tick_bottom_value = ticks[-1]
+    path_ys = [y for _, y in points]
+    path_top_y = min(path_ys)
+    path_bottom_y = max(path_ys)
+    if path_bottom_y == path_top_y:
+        raise RuntimeError("Path Y range is degenerate.")
 
     last_x, last_y = points[-1]
-    ratio = (last_y - top_y) / (bottom_y - top_y)
-    value_raw = top_value + (bottom_value - top_value) * ratio
+    ratio = (last_y - path_top_y) / (path_bottom_y - path_top_y)
+    value_raw = tick_top_value + (tick_bottom_value - tick_top_value) * ratio
 
-    tick_values = [v for _, v in ticks]
-    inferred_unit = _infer_ui_unit_from_ticks(tick_values)
+    inferred_unit = _infer_ui_unit_from_ticks([v for _, v in ticks])
     render_mode = _resolve_ui_render_mode(inferred_unit)
     value_unit = render_mode
     if value_unit == "F":
@@ -547,10 +592,10 @@ def read_ui_state(driver: webdriver.Chrome) -> UiState:
         source="svg_temperature_line",
         path_last_y=last_y,
         path_last_x=last_x,
-        y_axis_top_y=top_y,
-        y_axis_bottom_y=bottom_y,
-        y_axis_top_value=top_value,
-        y_axis_bottom_value=bottom_value,
+        y_axis_top_y=path_top_y,
+        y_axis_bottom_y=path_bottom_y,
+        y_axis_top_value=tick_top_value,
+        y_axis_bottom_value=tick_bottom_value,
         path_point_count=len(points),
         page_title=str(payload.get("pageTitle") or ""),
     )
@@ -718,7 +763,6 @@ def main() -> int:
     global LOCATION_ID
 
     session = build_session()
-
     if LOCATION_ID is None:
         LOCATION_ID = resolve_location_id_from_page_api(session, TARGET_PAGE_URL)
 
@@ -742,7 +786,6 @@ def main() -> int:
         while True:
             try:
                 memory.poll_count += 1
-
                 api_json = fetch_historical_json(session)
                 api_state = extract_api_state(api_json)
                 process_api_state(memory, api_state)
@@ -765,15 +808,25 @@ def main() -> int:
                 print()
                 input("Press Enter to exit...")
                 return 0
-            except (InvalidSessionIdException, WebDriverException) as exc:
+
+            except InvalidSessionIdException as exc:
                 log("BROWSER_RESET", f"{type(exc).__name__}: browser session lost; recreating driver")
                 close_driver_safely(driver)
                 driver = None
+
+            except JavascriptException as exc:
+                log("BROWSER_JS", f"{type(exc).__name__}: {exc}")
+
+            except WebDriverException as exc:
+                log("BROWSER_RESET", f"{type(exc).__name__}: webdriver failure; recreating driver")
+                close_driver_safely(driver)
+                driver = None
+
             except (RuntimeError, TimeoutException, requests.RequestException) as exc:
-                if isinstance(exc, RuntimeError) and "Not enough Y-axis ticks" in str(exc):
+                if isinstance(exc, RuntimeError) and ("Not enough Y-axis ticks" in str(exc) or "SVG JS extraction failed" in str(exc) or "Temperature SVG path" in str(exc)):
                     try:
                         dbg = driver.execute_script(
-                            "return {title: document.title || '', tickTexts: Array.from(document.querySelectorAll('svg text')).map(x => (x.textContent || '').trim()).filter(Boolean).slice(0, 80), hasPath: !!document.querySelector('g.plot.temperature.line path, svg path')};"
+                            "return {title: document.title || '', lastPayload: window.__dbg_last_payload || null, tickTexts: Array.from(document.querySelectorAll('text, svg text')).map(x => (x.textContent || '').trim()).filter(Boolean).slice(0, 120), hasPath: !!document.querySelector('g.plot.temperature.line path')};"
                         ) if driver is not None else {}
                     except Exception:
                         dbg = {}
