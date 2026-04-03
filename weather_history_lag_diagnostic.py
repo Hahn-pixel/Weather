@@ -24,7 +24,6 @@ except Exception as exc:
 try:
     from selenium import webdriver
     from selenium.common.exceptions import InvalidSessionIdException, JavascriptException, TimeoutException, WebDriverException
-    from selenium.webdriver import ActionChains
     from selenium.webdriver.chrome.options import Options
     from selenium.webdriver.chrome.service import Service
     from selenium.webdriver.common.by import By
@@ -63,6 +62,8 @@ REFERER = "https://www.wunderground.com/"
 MATCH_TOLERANCE_C = Decimal("0.001")
 MATCH_TOLERANCE_F = Decimal("0.001")
 HOVER_PAUSE_SECONDS = 0.20
+CHART_ACTIVATION_ATTEMPTS = 3
+CHART_READY_RETRY_DELAY_SECONDS = 0.35
 
 
 # =========================
@@ -372,7 +373,15 @@ def close_driver_safely(driver: Optional[webdriver.Chrome]) -> None:
 def wait_for_temperature_charts(driver: webdriver.Chrome) -> None:
     WebDriverWait(driver, CHART_WAIT_TIMEOUT_SECONDS).until(
         lambda d: d.execute_script(
-            "return Array.from(document.querySelectorAll('div.legend')).some(x => /Temperature/i.test(x.textContent || ''));"
+            """
+            try {
+                const legends = Array.from(document.querySelectorAll('div.legend, .legend .legend-def'));
+                return legends.some(x => /Temperature/i.test(x.textContent || ''));
+            } catch (err) {
+                window.__dbg_wait_error = String(err);
+                return false;
+            }
+            """
         )
     )
     time.sleep(0.35)
@@ -380,16 +389,34 @@ def wait_for_temperature_charts(driver: webdriver.Chrome) -> None:
 
 
 def _temperature_chart_containers(driver: webdriver.Chrome) -> List[Any]:
+    script = r"""
+    try {
+      const chartDivs = Array.from(document.querySelectorAll('lib-wu-chart .charts-canvas > div'));
+      return chartDivs
+        .map((container, idx) => {
+          const legendDefs = Array.from(container.querySelectorAll('.legend .legend-def'));
+          const legendText = legendDefs.map(x => (x.textContent || '').replace(/\s+/g, ' ').trim()).filter(Boolean).join(' | ');
+          return {idx: idx, legendText: legendText};
+        })
+        .filter(item => /Temperature/i.test(item.legendText || ''))
+        .map(item => item.idx);
+    } catch (err) {
+      window.__dbg_container_scan_error = String(err);
+      return [];
+    }
+    """
+    indexes = driver.execute_script(script)
+    if not isinstance(indexes, list):
+        return []
     candidates = driver.find_elements(By.CSS_SELECTOR, "lib-wu-chart .charts-canvas > div")
     output: List[Any] = []
-    for element in candidates:
+    for idx in indexes:
         try:
-            legend_defs = element.find_elements(By.CSS_SELECTOR, ".legend .legend-def")
-            legend_text = " | ".join((x.text or "").strip() for x in legend_defs if (x.text or "").strip())
-            if "Temperature" in legend_text:
-                output.append(element)
+            idx_int = int(idx)
         except Exception:
             continue
+        if 0 <= idx_int < len(candidates):
+            output.append(candidates[idx_int])
     return output
 
 
@@ -408,40 +435,192 @@ def _container_debug_snapshot(container: Any) -> Dict[str, Any]:
         bar_count = len(container.find_elements(By.CSS_SELECTOR, "rect.bc-bar"))
     except Exception:
         bar_count = 0
-    return {"legend": legend_text, "local_callout": local_callout, "bar_count": bar_count}
+    try:
+        path_present = bool(container.find_elements(By.CSS_SELECTOR, "g.plot.temperature.line path"))
+    except Exception:
+        path_present = False
+    return {"legend": legend_text, "local_callout": local_callout, "bar_count": bar_count, "path_present": path_present}
 
 
 
 def _activate_temperature_chart_callouts(driver: webdriver.Chrome) -> None:
-    charts = _temperature_chart_containers(driver)
-    hover_debug: List[Dict[str, Any]] = []
-    for idx, container in enumerate(charts):
-        snap_before = _container_debug_snapshot(container)
-        try:
-            bars = container.find_elements(By.CSS_SELECTOR, "rect.bc-bar")
-            if not bars:
-                hover_debug.append({"idx": idx, **snap_before, "status": "no_bars"})
-                continue
-            target = bars[-2] if len(bars) >= 2 else bars[-1]
-            ActionChains(driver).move_to_element(target).pause(HOVER_PAUSE_SECONDS).perform()
-            time.sleep(HOVER_PAUSE_SECONDS)
-            snap_after = _container_debug_snapshot(container)
-            hover_debug.append(
-                {
-                    "idx": idx,
-                    "legend": snap_before["legend"],
-                    "callout_before": snap_before["local_callout"],
-                    "callout_after": snap_after["local_callout"],
-                    "bar_count": snap_after["bar_count"],
-                    "status": "ok",
-                }
-            )
-        except Exception as exc:
-            hover_debug.append({"idx": idx, **snap_before, "status": f"hover_failed:{type(exc).__name__}:{exc}"})
-    try:
-        driver.execute_script("window.__dbg_hover_debug = arguments[0];", hover_debug)
-    except Exception:
-        pass
+    script = r"""
+    const attempts = arguments[0];
+    const pauseMs = arguments[1];
+    const callback = arguments[arguments.length - 1];
+    const result = {attempts: attempts, charts: [], error: null};
+    try {
+      const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+      const normalizeText = (value) => (value || '').replace(/\s+/g, ' ').trim();
+
+      const getLegendText = (container) => {
+        try {
+          return Array.from(container.querySelectorAll('.legend .legend-def'))
+            .map(x => normalizeText(x.textContent || ''))
+            .filter(Boolean)
+            .join(' | ');
+        } catch (err) {
+          return '';
+        }
+      };
+
+      const getCalloutText = (container) => {
+        try {
+          const el = container.querySelector('.callout.temperature .callout-text');
+          return el ? normalizeText(el.textContent || '') : '';
+        } catch (err) {
+          return '';
+        }
+      };
+
+      const getPath = (container) => {
+        try {
+          return container.querySelector('g.plot.temperature.line path');
+        } catch (err) {
+          return null;
+        }
+      };
+
+      const dispatchAt = (target, x, y) => {
+        const eventInit = {clientX: x, clientY: y, bubbles: true, cancelable: true, composed: true, view: window};
+        ['pointerover', 'mouseover', 'pointerenter', 'mouseenter', 'pointermove', 'mousemove'].forEach(type => {
+          const Ctor = type.startsWith('pointer') ? PointerEvent : MouseEvent;
+          target.dispatchEvent(new Ctor(type, eventInit));
+        });
+      };
+
+      const activateContainer = async (container, idx) => {
+        const item = {
+          idx: idx,
+          legend: getLegendText(container),
+          status: 'init',
+          callout_before: getCalloutText(container),
+          callout_after: '',
+          path_present_before: false,
+          path_present_after: false,
+          bar_count: 0,
+          attempts_used: 0,
+        };
+
+        let bars = [];
+        try {
+          bars = Array.from(container.querySelectorAll('rect.bc-bar'));
+          item.bar_count = bars.length;
+        } catch (err) {
+          bars = [];
+        }
+
+        let activated = false;
+        for (let attempt = 1; attempt <= attempts; attempt += 1) {
+          item.attempts_used = attempt;
+          const path = getPath(container);
+          item.path_present_before = item.path_present_before || !!path;
+
+          if (path) {
+            const rect = path.getBoundingClientRect();
+            const x = Math.max(rect.left + 1, rect.right - 2);
+            const y = rect.top + (rect.height / 2.0);
+            dispatchAt(path, x, y);
+            activated = true;
+          } else if (bars.length) {
+            const target = bars.length >= 2 ? bars[bars.length - 2] : bars[bars.length - 1];
+            const rect = target.getBoundingClientRect();
+            const x = rect.left + Math.max(1, rect.width - 2);
+            const y = rect.top + Math.max(1, rect.height / 2.0);
+            dispatchAt(target, x, y);
+            activated = true;
+          }
+
+          await sleep(pauseMs);
+
+          const callout = getCalloutText(container);
+          if (callout) {
+            item.callout_after = callout;
+            item.path_present_after = !!getPath(container);
+            item.status = activated ? 'ok' : 'no_target';
+            return item;
+          }
+        }
+
+        item.callout_after = getCalloutText(container);
+        item.path_present_after = !!getPath(container);
+        if (!activated) {
+          item.status = bars.length ? 'bars_only_no_activation' : 'no_path_no_bars';
+        } else if (item.callout_after) {
+          item.status = 'late_callout';
+        } else {
+          item.status = 'activated_no_callout';
+        }
+        return item;
+      };
+
+      (async () => {
+        const chartDivs = Array.from(document.querySelectorAll('lib-wu-chart .charts-canvas > div'));
+        const temperatureContainers = chartDivs.filter(container => /Temperature/i.test(getLegendText(container)));
+        for (let idx = 0; idx < temperatureContainers.length; idx += 1) {
+          const item = await activateContainer(temperatureContainers[idx], idx);
+          result.charts.push(item);
+        }
+        window.__dbg_hover_debug = result;
+        callback(result);
+      })().catch(err => {
+        result.error = String(err);
+        window.__dbg_hover_debug = result;
+        callback(result);
+      });
+    } catch (err) {
+      result.error = String(err);
+      window.__dbg_hover_debug = result;
+      callback(result);
+    }
+    """
+    result = driver.execute_async_script(
+        script,
+        int(CHART_ACTIVATION_ATTEMPTS),
+        int(max(1, round(HOVER_PAUSE_SECONDS * 1000))),
+    )
+    if isinstance(result, dict) and result.get("error"):
+        raise RuntimeError(f"Chart activation JS failed: {result.get('error')}")
+
+
+
+def _wait_for_temperature_svg_paths(driver: webdriver.Chrome) -> None:
+    deadline = time.time() + CHART_WAIT_TIMEOUT_SECONDS
+    while time.time() < deadline:
+        payload = driver.execute_script(
+            """
+            try {
+              const chartDivs = Array.from(document.querySelectorAll('lib-wu-chart .charts-canvas > div'));
+              const items = chartDivs.map(container => {
+                const legendText = Array.from(container.querySelectorAll('.legend .legend-def'))
+                  .map(x => (x.textContent || '').replace(/\\s+/g, ' ').trim())
+                  .filter(Boolean)
+                  .join(' | ');
+                if (!/Temperature/i.test(legendText)) return null;
+                const unit = /°C|\\(C\\)/i.test(legendText) ? 'C' : (/°F|\\(F\\)/i.test(legendText) ? 'F' : '?');
+                return {
+                  unit: unit,
+                  pathPresent: !!container.querySelector('g.plot.temperature.line path'),
+                  calloutPresent: !!container.querySelector('.callout.temperature .callout-text'),
+                };
+              }).filter(Boolean);
+              window.__dbg_path_wait = items;
+              return items;
+            } catch (err) {
+              window.__dbg_path_wait_error = String(err);
+              return [];
+            }
+            """
+        )
+        seen = {item.get("unit"): item for item in payload if isinstance(item, dict)}
+        if (
+            seen.get("C") and seen.get("F")
+            and (seen["C"].get("pathPresent") or seen["C"].get("calloutPresent"))
+            and (seen["F"].get("pathPresent") or seen["F"].get("calloutPresent"))
+        ):
+            return
+        time.sleep(CHART_READY_RETRY_DELAY_SECONDS)
+    raise RuntimeError("Temperature charts did not expose both C and F path/callout states before timeout.")
 
 
 
@@ -476,7 +655,21 @@ try {
       });
 
       const tempPath = container.querySelector('g.plot.temperature.line path');
-      const pathD = tempPath ? (tempPath.getAttribute('d') || '') : '';
+      if (!tempPath) {
+        result.charts.push({
+          chartIndex: idx,
+          legendText: temperatureLegend,
+          calloutText: calloutText,
+          yTicks: yTicks,
+          pathD: '',
+          pathPresent: false,
+          barCount: Array.from(container.querySelectorAll('rect.bc-bar')).length,
+          innerError: null,
+        });
+        return;
+      }
+
+      const pathD = tempPath.getAttribute('d') || '';
       const bars = Array.from(container.querySelectorAll('rect.bc-bar'));
 
       result.charts.push({
@@ -485,11 +678,12 @@ try {
         calloutText: calloutText,
         yTicks: yTicks,
         pathD: pathD,
+        pathPresent: true,
         barCount: bars.length,
         innerError: null,
       });
     } catch (errInner) {
-      result.charts.push({ chartIndex: idx, legendText: '', calloutText: '', yTicks: [], pathD: '', barCount: 0, innerError: String(errInner) });
+      result.charts.push({ chartIndex: idx, legendText: '', calloutText: '', yTicks: [], pathD: '', pathPresent: false, barCount: 0, innerError: String(errInner) });
     }
   });
 } catch (err) {
@@ -632,6 +826,7 @@ def read_ui_states(driver: webdriver.Chrome) -> Dict[str, UiState]:
     driver.get(TARGET_PAGE_URL)
     wait_for_temperature_charts(driver)
     _activate_temperature_chart_callouts(driver)
+    _wait_for_temperature_svg_paths(driver)
     payload = _extract_temperature_chart_payload(driver)
     if payload.get("noData") and not payload.get("charts"):
         raise RuntimeError("History UI shows 'No Data Recorded'.")
@@ -642,7 +837,7 @@ def read_ui_states(driver: webdriver.Chrome) -> Dict[str, UiState]:
         try:
             state = _build_ui_state_from_chart(chart, page_title)
         except Exception as exc:
-            chart_errors.append(f"idx={chart.get('chartIndex')} legend={chart.get('legendText')!r} bar_count={chart.get('barCount')} callout={chart.get('calloutText')!r} err={exc}")
+            chart_errors.append(f"idx={chart.get('chartIndex')} legend={chart.get('legendText')!r} path_present={chart.get('pathPresent')} bar_count={chart.get('barCount')} callout={chart.get('calloutText')!r} err={exc}")
             continue
         states[state.stream_unit] = state
     if not states:
@@ -900,7 +1095,7 @@ def main() -> int:
             except (RuntimeError, TimeoutException, requests.RequestException) as exc:
                 try:
                     dbg = driver.execute_script(
-                        "return {title: document.title || '', lastPayload: window.__dbg_last_payload || null, hoverDebug: window.__dbg_hover_debug || null, callouts: Array.from(document.querySelectorAll('.callout.temperature .callout-text')).map(x => (x.textContent || '').trim()), legends: Array.from(document.querySelectorAll('.legend .legend-def')).map(x => (x.textContent || '').replace(/\\s+/g, ' ').trim())};"
+                        "return {title: document.title || '', lastPayload: window.__dbg_last_payload || null, hoverDebug: window.__dbg_hover_debug || null, pathWait: window.__dbg_path_wait || null, callouts: Array.from(document.querySelectorAll('.callout.temperature .callout-text')).map(x => (x.textContent || '').trim()), legends: Array.from(document.querySelectorAll('.legend .legend-def')).map(x => (x.textContent || '').replace(/\\s+/g, ' ').trim())};"
                     ) if driver is not None else {}
                 except Exception:
                     dbg = {}
