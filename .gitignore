@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+data/
+artifacts/
+outputs/logs/
+outputs/reports/
+*.zip
+models/
+cache/
+*.csv
+github.txt
+nppBackup/
+*.bak
+README.md
