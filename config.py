@@ -3,7 +3,7 @@
 
 from decimal import Decimal
 
-TARGET_PAGE_URL = "https://www.wunderground.com/history/daily/fr/paris/LFPI/date/2026-4-3"
+TARGET_PAGE_URL = "https://www.wunderground.com/history/daily/us/tx/houston/KHOU/date/2026-4-4"
 LOCATION_ID = None
 API_KEY = "e1f10a1e78da46f5b10a1e78da96f525"
 

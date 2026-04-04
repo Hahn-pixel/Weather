@@ -4,11 +4,10 @@
 from __future__ import annotations
 
 import time
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional
 
 from selenium import webdriver
-from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
@@ -59,6 +58,18 @@ def close_driver_safely(driver: Optional[webdriver.Chrome]) -> None:
         driver.quit()
     except Exception:
         pass
+
+
+def _round_temp(value: Decimal) -> Decimal:
+    return value.quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
+
+
+def _c_to_f(value_c: Decimal) -> Decimal:
+    return _round_temp((value_c * Decimal("9") / Decimal("5")) + Decimal("32"))
+
+
+def _f_to_c(value_f: Decimal) -> Decimal:
+    return _round_temp((value_f - Decimal("32")) * Decimal("5") / Decimal("9"))
 
 
 def wait_for_temperature_charts(driver: webdriver.Chrome) -> None:
@@ -224,7 +235,7 @@ def activate_temperature_chart_callouts(driver: webdriver.Chrome) -> None:
         raise RuntimeError(f"Chart activation JS failed: {result.get('error')}")
 
 
-def wait_for_temperature_svg_paths(driver: webdriver.Chrome) -> None:
+def wait_for_any_temperature_stream(driver: webdriver.Chrome) -> None:
     deadline = time.time() + CHART_WAIT_TIMEOUT_SECONDS
 
     while time.time() < deadline:
@@ -258,18 +269,19 @@ def wait_for_temperature_svg_paths(driver: webdriver.Chrome) -> None:
             """
         )
 
-        seen = {item.get("unit"): item for item in payload if isinstance(item, dict)}
+        usable = [
+            item for item in payload
+            if isinstance(item, dict)
+            and item.get("unit") in {"C", "F"}
+            and (item.get("pathPresent") or item.get("calloutPresent"))
+        ]
 
-        if (
-            seen.get("C") and seen.get("F")
-            and (seen["C"].get("pathPresent") or seen["C"].get("calloutPresent"))
-            and (seen["F"].get("pathPresent") or seen["F"].get("calloutPresent"))
-        ):
+        if usable:
             return
 
         time.sleep(CHART_READY_RETRY_DELAY_SECONDS)
 
-    raise RuntimeError("Temperature charts did not expose both C and F path/callout states before timeout.")
+    raise RuntimeError("Temperature chart did not expose any usable path/callout state before timeout.")
 
 
 def extract_temperature_chart_payload(driver: webdriver.Chrome) -> Dict[str, Any]:
@@ -405,6 +417,8 @@ def build_ui_state_from_chart(chart: Dict[str, Any], page_title: str) -> UiState
         last_x, last_y = path_points[-1]
         ratio = (last_y - path_top_y) / (path_bottom_y - path_top_y)
         value_raw = tick_top_value + (tick_bottom_value - tick_top_value) * ratio
+        value_raw = _round_temp(value_raw)
+
         source_mode = "svg_fallback"
         path_last_x = last_x
         path_last_y = last_y
@@ -441,11 +455,49 @@ def build_ui_state_from_chart(chart: Dict[str, Any], page_title: str) -> UiState
     )
 
 
+def _clone_converted_state(source: UiState, target_unit: str) -> UiState:
+    if source.stream_unit == target_unit:
+        return source
+
+    if source.stream_unit == "F" and target_unit == "C":
+        converted = _f_to_c(source.value_raw)
+    elif source.stream_unit == "C" and target_unit == "F":
+        converted = _c_to_f(source.value_raw)
+    else:
+        raise RuntimeError(f"Unsupported conversion: {source.stream_unit} -> {target_unit}")
+
+    value_c = converted if target_unit == "C" else Decimal("NaN")
+    value_f = converted if target_unit == "F" else Decimal("NaN")
+
+    return UiState(
+        stream_unit=target_unit,
+        source_mode=f"converted_from_{source.stream_unit}",
+        value_raw=converted,
+        value_c=value_c,
+        value_f=value_f,
+        legend_text=source.legend_text,
+        callout_text=source.callout_text,
+        source="temperature_chart_converted",
+        chart_index=source.chart_index,
+        bar_count=source.bar_count,
+        callout_before=source.callout_before,
+        callout_after=source.callout_after,
+        path_last_y=source.path_last_y,
+        path_last_x=source.path_last_x,
+        y_axis_top_y=source.y_axis_top_y,
+        y_axis_bottom_y=source.y_axis_bottom_y,
+        y_axis_top_value=source.y_axis_top_value,
+        y_axis_bottom_value=source.y_axis_bottom_value,
+        path_point_count=source.path_point_count,
+        page_title=source.page_title,
+    )
+
+
 def read_ui_states(driver: webdriver.Chrome) -> Dict[str, UiState]:
     driver.get(TARGET_PAGE_URL)
     wait_for_temperature_charts(driver)
     activate_temperature_chart_callouts(driver)
-    wait_for_temperature_svg_paths(driver)
+    wait_for_any_temperature_stream(driver)
 
     payload = extract_temperature_chart_payload(driver)
 
@@ -473,6 +525,12 @@ def read_ui_states(driver: webdriver.Chrome) -> Dict[str, UiState]:
 
     if not states:
         raise RuntimeError(f"No usable temperature charts found. Chart errors: {' | '.join(chart_errors)}")
+
+    if "C" not in states and "F" in states:
+        states["C"] = _clone_converted_state(states["F"], "C")
+
+    if "F" not in states and "C" in states:
+        states["F"] = _clone_converted_state(states["C"], "F")
 
     return states
 
