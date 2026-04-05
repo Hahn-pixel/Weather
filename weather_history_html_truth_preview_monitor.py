@@ -21,40 +21,34 @@ except Exception as exc:
     input("Press Enter to exit...")
     raise
 
+try:
+    from win10toast import ToastNotifier  # type: ignore
+except Exception:
+    ToastNotifier = None  # type: ignore
+
 
 # ============================================================
 # CONFIG
 # ============================================================
-# Pages to monitor
 TARGET_PAGES = [
     "https://www.wunderground.com/history/daily/us/tx/houston/KHOU/date/2026-4-5",
     "https://www.wunderground.com/history/daily/it/ciampino/LIRA/date/2026-4-5",
     "https://www.wunderground.com/history/daily/hu/budapest/LHBP/date/2026-4-5",
 ]
 
-# Compatibility alias for older code parts
-TARGET_PAGE_URL = TARGET_PAGES[0]
-
-# Location IDs resolved at runtime
-LOCATION_IDS: Dict[str, str] = {}
-LOCATION_ID = None
 API_KEY = "e1f10a1e78da46f5b10a1e78da96f525"
-
-# Modes:
-# - preview_only
-# - truth_only
-# - truth_plus_preview
-RUN_MODE = "truth_plus_preview"
-
+RUN_MODE = "truth_plus_preview"  # preview_only | truth_only | truth_plus_preview
 CHECK_INTERVAL_SECONDS = 5
 REQUEST_TIMEOUT_SECONDS = 20
 VERIFY_TLS = True
 
-LOG_TO_FILE = False
-LOG_FILE_PATH = "weather_history_api_truth_monitor.log"
+# Truth selection from historical observations array
+TRUTH_ARRAY_POINT_MODE = "latest"  # latest | previous | penultimate_nonempty
 
+LOG_TO_FILE = False
+LOG_FILE_PATH = "weather_history_html_truth_preview_monitor.log"
 WRITE_JSONL_EVENTS = True
-JSONL_FILE_PATH = "weather_history_api_truth_monitor.jsonl"
+JSONL_FILE_PATH = "weather_history_html_truth_preview_monitor.jsonl"
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -66,21 +60,11 @@ REFERER = "https://www.wunderground.com/"
 MATCH_TOLERANCE_C = Decimal("0.001")
 MATCH_TOLERANCE_F = Decimal("0.001")
 
-# How truth is selected from the same historical observations array:
-# - latest: observations[-1]
-# - previous: observations[-2]
-# - penultimate_nonzero: last non-empty temp value scanning from the end
-TRUTH_ARRAY_POINT_MODE = "latest"
-
-# Alerts on value change
-ENABLE_CONSOLE_ALERT = False
+# Alerts: desktop notifications only for truth changes.
 ENABLE_DESKTOP_ALERT = True
-ALERT_PREFIX = "[ALERT]"
-ENABLE_BELL_ALERT = True
-
-# Optional guard: if the last observation changes but its valid_time_gmt did not,
-# treat it as the same row identity unless temp changed too.
-USE_VALID_TIME_IN_TRUTH_IDENTITY = True
+ENABLE_BELL_ALERT = False
+DESKTOP_ALERT_TITLE = "Weather Truth Change"
+DESKTOP_ALERT_DURATION_SECONDS = 5
 
 
 # ============================================================
@@ -88,6 +72,8 @@ USE_VALID_TIME_IN_TRUTH_IDENTITY = True
 # ============================================================
 @dataclass
 class PreviewState:
+    page_url: str
+    location_id: str
     stream_unit: str
     value_raw: Decimal
     valid_time_gmt: int
@@ -103,6 +89,8 @@ class PreviewState:
 
 @dataclass
 class TruthState:
+    page_url: str
+    location_id: str
     stream_unit: str
     value_raw: Decimal
     valid_time_gmt: int
@@ -118,13 +106,19 @@ class TruthState:
 
 
 @dataclass
+class PageContext:
+    page_url: str
+    location_id: str
+    date_key: str
+
+
+@dataclass
 class MonitorMemory:
     poll_count: int = 0
-    last_truth_identity_by_stream: Dict[str, Optional[str]] = field(default_factory=lambda: {"C": None, "F": None})
-    last_preview_identity_by_stream: Dict[str, Optional[str]] = field(default_factory=lambda: {"C": None, "F": None})
-    pending_preview_by_stream: Dict[str, Dict[str, PreviewState]] = field(default_factory=lambda: {"C": {}, "F": {}})
-    last_alerted_preview_value_by_stream: Dict[str, Optional[str]] = field(default_factory=lambda: {"C": None, "F": None})
-    last_alerted_truth_value_by_stream: Dict[str, Optional[str]] = field(default_factory=lambda: {"C": None, "F": None})
+    last_truth_identity_by_key: Dict[str, Optional[str]] = field(default_factory=dict)
+    last_preview_identity_by_key: Dict[str, Optional[str]] = field(default_factory=dict)
+    pending_preview_by_key: Dict[str, Dict[str, PreviewState]] = field(default_factory=dict)
+    last_alerted_truth_value_by_key: Dict[str, Optional[str]] = field(default_factory=dict)
 
 
 # ============================================================
@@ -137,7 +131,6 @@ class Logger:
 
         if self.text_path:
             self.text_path.parent.mkdir(parents=True, exist_ok=True)
-
         if self.jsonl_path:
             self.jsonl_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -169,20 +162,6 @@ LOGGER = Logger(LOG_FILE_PATH if LOG_TO_FILE else None, JSONL_FILE_PATH if WRITE
 
 def log(tag: str, message: str, payload: Optional[Dict[str, Any]] = None) -> None:
     LOGGER.write(tag, message, payload)
-
-
-def emit_alert(message: str, payload: Optional[Dict[str, Any]] = None) -> None:
-    # Desktop notification only (truth changes)
-    if ENABLE_DESKTOP_ALERT:
-        try:
-            from win10toast import ToastNotifier
-            toaster = ToastNotifier()
-            toaster.show_toast("Weather Truth Change", message, duration=5, threaded=True)
-        except Exception:
-            pass
-
-    if ENABLE_BELL_ALERT:
-        print("", end="", flush=True)("", end="", flush=True)
 
 
 # ============================================================
@@ -220,14 +199,10 @@ def stream_tolerance(stream_unit: str) -> Decimal:
     return MATCH_TOLERANCE_C if stream_unit == "C" else MATCH_TOLERANCE_F
 
 
-def current_date_yyyymmdd() -> str:
-    return datetime.now().strftime("%Y%m%d")
-
-
 def derive_history_date_from_url(url: str) -> str:
     match = re.search(r"/date/(\d{4})-(\d{1,2})-(\d{1,2})(?:/|$)", url, re.IGNORECASE)
     if not match:
-        return current_date_yyyymmdd()
+        raise RuntimeError(f"Cannot derive history date from URL: {url}")
     return f"{int(match.group(1)):04d}{int(match.group(2)):02d}{int(match.group(3)):02d}"
 
 
@@ -250,18 +225,20 @@ def epoch_to_utc_str(epoch_seconds: int) -> str:
     return datetime.fromtimestamp(epoch_seconds, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
+def stream_key(page_url: str, stream_unit: str) -> str:
+    return f"{page_url}|{stream_unit}"
+
+
 def preview_identity(state: PreviewState) -> str:
-    return f"{state.stream_unit}|{state.valid_time_gmt}|{decimal_key(state.value_raw)}"
+    return f"{state.valid_time_gmt}|{decimal_key(state.value_raw)}"
+
+
+def truth_identity(state: TruthState) -> str:
+    return f"{state.valid_time_gmt}|{decimal_key(state.value_raw)}"
 
 
 def preview_bucket_key(state: PreviewState) -> str:
     return f"{decimal_key(state.value_raw)}|{state.valid_time_gmt}"
-
-
-def truth_identity(state: TruthState) -> str:
-    if USE_VALID_TIME_IN_TRUTH_IDENTITY:
-        return f"{state.stream_unit}|{state.valid_time_gmt}|{decimal_key(state.value_raw)}"
-    return f"{state.stream_unit}|{decimal_key(state.value_raw)}"
 
 
 def coerce_int(value: Any) -> int:
@@ -275,6 +252,35 @@ def coerce_int(value: Any) -> int:
     if text == "":
         return 0
     return int(float(text))
+
+
+# ============================================================
+# ALERTS
+# ============================================================
+def emit_truth_alert(state: TruthState) -> None:
+    if ENABLE_DESKTOP_ALERT and ToastNotifier is not None:
+        try:
+            toaster = ToastNotifier()
+            message = (
+                f"{state.obs_name or state.location_id} | {state.stream_unit} {fmt_decimal(state.value_raw)}°{state.stream_unit} | "
+                f"{epoch_to_utc_str(state.valid_time_gmt)}"
+            )
+            show_toast = getattr(toaster, "show_toast", None)
+            if callable(show_toast):
+                show_toast(
+                    DESKTOP_ALERT_TITLE,
+                    message,
+                    duration=DESKTOP_ALERT_DURATION_SECONDS,
+                    threaded=True,
+                )
+        except Exception as exc:
+            log("ALERT_ERR", f"Desktop alert failed: {type(exc).__name__}: {exc}")
+
+    if ENABLE_BELL_ALERT:
+        try:
+            print("\a", end="", flush=True)
+        except Exception:
+            pass
 
 
 # ============================================================
@@ -300,27 +306,6 @@ def historical_url(location_id: str) -> str:
     return f"https://api.weather.com/v1/location/{location_id}/observations/historical.json"
 
 
-def resolve_location_id_from_page_api(session: requests.Session, page_url: str) -> str:
-    response = session.get(page_url, timeout=REQUEST_TIMEOUT_SECONDS, verify=VERIFY_TLS)
-    response.raise_for_status()
-    html = response.text
-
-    patterns = [
-        r"/v1/location/([^/]+)/observations/historical\.json",
-        r"https://api\.weather\.com/v1/location/([^/]+)/observations/historical\.json",
-        r'"locationKey"\s*:\s*"([^"]+)"',
-    ]
-
-    for pattern in patterns:
-        match = re.search(pattern, html, re.IGNORECASE)
-        if match:
-            value = match.group(1)
-            if ":9:" in value:
-                return value
-
-    return derive_location_id_from_url(page_url)
-
-
 def fetch_historical_json(session: requests.Session, location_id: str, units: str, date_key: str) -> Dict[str, Any]:
     response = session.get(
         historical_url(location_id),
@@ -338,21 +323,48 @@ def fetch_historical_json(session: requests.Session, location_id: str, units: st
 
 
 # ============================================================
-# EXTRACTION FROM HISTORICAL OBSERVATIONS ARRAY
+# ARRAY POINT SELECTION
 # ============================================================
-def extract_latest_preview_state(data: Dict[str, Any], units: str) -> PreviewState:
+def select_observation(observations: List[Dict[str, Any]], mode: str) -> tuple[int, Dict[str, Any]]:
+    if not observations:
+        raise RuntimeError("Cannot select observation from empty observations array.")
+
+    if mode == "latest":
+        return len(observations) - 1, observations[-1]
+
+    if mode == "previous":
+        if len(observations) >= 2:
+            return len(observations) - 2, observations[-2]
+        return len(observations) - 1, observations[-1]
+
+    if mode == "penultimate_nonempty":
+        for idx in range(len(observations) - 1, -1, -1):
+            item = observations[idx]
+            if maybe_decimal(item.get("temp")) is not None:
+                return idx, item
+        return len(observations) - 1, observations[-1]
+
+    raise RuntimeError(f"Unsupported TRUTH_ARRAY_POINT_MODE: {mode!r}")
+
+
+# ============================================================
+# EXTRACTION
+# ============================================================
+def extract_preview_state(page_ctx: PageContext, data: Dict[str, Any], units: str) -> PreviewState:
     observations = data.get("observations")
     if not isinstance(observations, list) or not observations:
-        raise RuntimeError(f"Historical API returned no observations for units={units!r}.")
+        raise RuntimeError(f"Historical API returned no observations for preview units={units!r} on {page_ctx.page_url}")
 
     observation = observations[-1]
     if not isinstance(observation, dict) or "temp" not in observation:
-        raise RuntimeError(f"Last observation has no temp field for units={units!r}.")
+        raise RuntimeError(f"Preview observation has no temp field for units={units!r} on {page_ctx.page_url}")
 
     metadata = data.get("metadata") or {}
     stream_unit = "F" if units.lower() == "e" else "C"
 
     return PreviewState(
+        page_url=page_ctx.page_url,
+        location_id=page_ctx.location_id,
         stream_unit=stream_unit,
         value_raw=parse_decimal(observation.get("temp"), f"preview.temp.{units}"),
         valid_time_gmt=coerce_int(observation.get("valid_time_gmt")),
@@ -367,42 +379,21 @@ def extract_latest_preview_state(data: Dict[str, Any], units: str) -> PreviewSta
     )
 
 
-def select_truth_observation(observations: List[Dict[str, Any]], mode: str) -> tuple[int, Dict[str, Any]]:
-    if not observations:
-        raise RuntimeError("Cannot select truth observation from empty observations array.")
-
-    if mode == "latest":
-        return len(observations) - 1, observations[-1]
-
-    if mode == "previous":
-        if len(observations) < 2:
-            return len(observations) - 1, observations[-1]
-        return len(observations) - 2, observations[-2]
-
-    if mode == "penultimate_nonzero":
-        for idx in range(len(observations) - 1, -1, -1):
-            item = observations[idx]
-            temp = maybe_decimal(item.get("temp"))
-            if temp is not None:
-                return idx, item
-        return len(observations) - 1, observations[-1]
-
-    raise RuntimeError(f"Unsupported TRUTH_ARRAY_POINT_MODE: {mode!r}")
-
-
-def extract_truth_state(data: Dict[str, Any], units: str, point_mode: str) -> TruthState:
+def extract_truth_state(page_ctx: PageContext, data: Dict[str, Any], units: str, point_mode: str) -> TruthState:
     observations = data.get("observations")
     if not isinstance(observations, list) or not observations:
-        raise RuntimeError(f"Historical API returned no observations for truth units={units!r}.")
+        raise RuntimeError(f"Historical API returned no observations for truth units={units!r} on {page_ctx.page_url}")
 
-    row_index, observation = select_truth_observation(observations, point_mode)
+    row_index, observation = select_observation(observations, point_mode)
     if not isinstance(observation, dict) or "temp" not in observation:
-        raise RuntimeError(f"Truth observation has no temp field for units={units!r}.")
+        raise RuntimeError(f"Truth observation has no temp field for units={units!r} on {page_ctx.page_url}")
 
     metadata = data.get("metadata") or {}
     stream_unit = "F" if units.lower() == "e" else "C"
 
     return TruthState(
+        page_url=page_ctx.page_url,
+        location_id=page_ctx.location_id,
         stream_unit=stream_unit,
         value_raw=parse_decimal(observation.get("temp"), f"truth.temp.{units}"),
         valid_time_gmt=coerce_int(observation.get("valid_time_gmt")),
@@ -416,68 +407,50 @@ def extract_truth_state(data: Dict[str, Any], units: str, point_mode: str) -> Tr
     )
 
 
-def fetch_preview_states(session: requests.Session, location_id: str, date_key: str) -> Dict[str, PreviewState]:
-    states: Dict[str, PreviewState] = {}
-
-    data_c = fetch_historical_json(session, location_id, "m", date_key)
-    states["C"] = extract_latest_preview_state(data_c, "m")
-
-    data_f = fetch_historical_json(session, location_id, "e", date_key)
-    states["F"] = extract_latest_preview_state(data_f, "e")
-
-    return states
+def fetch_preview_states(session: requests.Session, page_ctx: PageContext) -> Dict[str, PreviewState]:
+    data_c = fetch_historical_json(session, page_ctx.location_id, "m", page_ctx.date_key)
+    data_f = fetch_historical_json(session, page_ctx.location_id, "e", page_ctx.date_key)
+    return {
+        "C": extract_preview_state(page_ctx, data_c, "m"),
+        "F": extract_preview_state(page_ctx, data_f, "e"),
+    }
 
 
-def fetch_truth_states(session: requests.Session, location_id: str, date_key: str, point_mode: str) -> Dict[str, TruthState]:
-    states: Dict[str, TruthState] = {}
-
-    data_c = fetch_historical_json(session, location_id, "m", date_key)
-    states["C"] = extract_truth_state(data_c, "m", point_mode)
-
-    data_f = fetch_historical_json(session, location_id, "e", date_key)
-    states["F"] = extract_truth_state(data_f, "e", point_mode)
-
-    return states
+def fetch_truth_states(session: requests.Session, page_ctx: PageContext, point_mode: str) -> Dict[str, TruthState]:
+    data_c = fetch_historical_json(session, page_ctx.location_id, "m", page_ctx.date_key)
+    data_f = fetch_historical_json(session, page_ctx.location_id, "e", page_ctx.date_key)
+    return {
+        "C": extract_truth_state(page_ctx, data_c, "m", point_mode),
+        "F": extract_truth_state(page_ctx, data_f, "e", point_mode),
+    }
 
 
 # ============================================================
-# MATCHER
+# MATCHER / PROCESSORS
 # ============================================================
 def process_preview_state(memory: MonitorMemory, state: PreviewState) -> None:
+    key = stream_key(state.page_url, state.stream_unit)
     identity = preview_identity(state)
-    if identity == memory.last_preview_identity_by_stream.get(state.stream_unit):
+    if identity == memory.last_preview_identity_by_key.get(key):
         return
-
-    prev_value_key = memory.last_alerted_preview_value_by_stream.get(state.stream_unit)
-    new_value_key = decimal_key(state.value_raw)
-    if prev_value_key != new_value_key:
-        emit_alert(
-            f"preview changed stream={state.stream_unit} value={fmt_decimal(state.value_raw)}°{state.stream_unit} valid_time_gmt={state.valid_time_gmt} ({epoch_to_utc_str(state.valid_time_gmt)}) obs_name={state.obs_name!r}",
-            {
-                "scope": "preview",
-                "stream_unit": state.stream_unit,
-                "value_raw": fmt_decimal(state.value_raw, 6),
-                "valid_time_gmt": state.valid_time_gmt,
-                "obs_name": state.obs_name,
-                "wx_phrase": state.wx_phrase,
-            },
-        )
-        memory.last_alerted_preview_value_by_stream[state.stream_unit] = new_value_key
 
     state.first_seen_epoch = time.time()
     state.first_seen_wall = LOGGER.now_str()
-    memory.last_preview_identity_by_stream[state.stream_unit] = identity
-    memory.pending_preview_by_stream[state.stream_unit][preview_bucket_key(state)] = state
+    memory.last_preview_identity_by_key[key] = identity
+    pending = memory.pending_preview_by_key.setdefault(key, {})
+    pending[preview_bucket_key(state)] = state
 
     log(
         "PREVIEW_NEW",
         (
-            f"stream={state.stream_unit} value={fmt_decimal(state.value_raw)}°{state.stream_unit} "
+            f"page={state.page_url} stream={state.stream_unit} value={fmt_decimal(state.value_raw)}°{state.stream_unit} "
             f"valid_time_gmt={state.valid_time_gmt} ({epoch_to_utc_str(state.valid_time_gmt)}) "
             f"expire_time_gmt={state.expire_time_gmt} ({epoch_to_utc_str(state.expire_time_gmt)}) "
             f"obs_name={state.obs_name!r} wx={state.wx_phrase!r}"
         ),
         {
+            "page_url": state.page_url,
+            "location_id": state.location_id,
             "stream_unit": state.stream_unit,
             "value_raw": fmt_decimal(state.value_raw, 6),
             "valid_time_gmt": state.valid_time_gmt,
@@ -485,49 +458,36 @@ def process_preview_state(memory: MonitorMemory, state: PreviewState) -> None:
             "obs_name": state.obs_name,
             "obs_id": state.obs_id,
             "wx_phrase": state.wx_phrase,
-            "wdir_cardinal": state.wdir_cardinal,
-            "wspd": fmt_decimal(state.wspd, 6) if state.wspd is not None else None,
-            "preview_identity": identity,
         },
     )
 
 
 def process_truth_state(memory: MonitorMemory, state: TruthState) -> None:
+    key = stream_key(state.page_url, state.stream_unit)
     identity = truth_identity(state)
-    if identity == memory.last_truth_identity_by_stream.get(state.stream_unit):
+    if identity == memory.last_truth_identity_by_key.get(key):
         return
 
-    prev_value_key = memory.last_alerted_truth_value_by_stream.get(state.stream_unit)
     new_value_key = decimal_key(state.value_raw)
-    if prev_value_key != new_value_key:
-        emit_alert(
-            f"truth changed stream={state.stream_unit} value={fmt_decimal(state.value_raw)}°{state.stream_unit} valid_time_gmt={state.valid_time_gmt} ({epoch_to_utc_str(state.valid_time_gmt)}) source_mode={state.source_mode}",
-            {
-                "scope": "truth",
-                "stream_unit": state.stream_unit,
-                "value_raw": fmt_decimal(state.value_raw, 6),
-                "valid_time_gmt": state.valid_time_gmt,
-                "source_mode": state.source_mode,
-                "obs_name": state.obs_name,
-                "wx_phrase": state.wx_phrase,
-            },
-        )
-        memory.last_alerted_truth_value_by_stream[state.stream_unit] = new_value_key
+    if memory.last_alerted_truth_value_by_key.get(key) != new_value_key:
+        emit_truth_alert(state)
+        memory.last_alerted_truth_value_by_key[key] = new_value_key
 
     state.first_seen_epoch = time.time()
     state.first_seen_wall = LOGGER.now_str()
-    memory.last_truth_identity_by_stream[state.stream_unit] = identity
+    memory.last_truth_identity_by_key[key] = identity
 
     log(
         "TRUTH_NEW",
         (
-            f"stream={state.stream_unit} source_mode={state.source_mode} "
-            f"value={fmt_decimal(state.value_raw)}°{state.stream_unit} "
-            f"row_index={state.row_index} row_count={state.row_count} "
+            f"page={state.page_url} stream={state.stream_unit} source_mode={state.source_mode} "
+            f"value={fmt_decimal(state.value_raw)}°{state.stream_unit} row_index={state.row_index} row_count={state.row_count} "
             f"valid_time_gmt={state.valid_time_gmt} ({epoch_to_utc_str(state.valid_time_gmt)}) "
             f"obs_name={state.obs_name!r} wx={state.wx_phrase!r}"
         ),
         {
+            "page_url": state.page_url,
+            "location_id": state.location_id,
             "stream_unit": state.stream_unit,
             "source_mode": state.source_mode,
             "value_raw": fmt_decimal(state.value_raw, 6),
@@ -538,7 +498,6 @@ def process_truth_state(memory: MonitorMemory, state: TruthState) -> None:
             "obs_name": state.obs_name,
             "obs_id": state.obs_id,
             "wx_phrase": state.wx_phrase,
-            "truth_identity": identity,
         },
     )
 
@@ -546,8 +505,8 @@ def process_truth_state(memory: MonitorMemory, state: TruthState) -> None:
 
 
 def evaluate_matches(memory: MonitorMemory, truth_state: TruthState) -> None:
-    stream_unit = truth_state.stream_unit
-    pending_map = memory.pending_preview_by_stream[stream_unit]
+    key = stream_key(truth_state.page_url, truth_state.stream_unit)
+    pending_map = memory.pending_preview_by_key.get(key, {})
     if not pending_map:
         return
 
@@ -556,9 +515,7 @@ def evaluate_matches(memory: MonitorMemory, truth_state: TruthState) -> None:
         return
 
     same_value_candidates = [
-        item
-        for item in candidates
-        if abs(item.value_raw - truth_state.value_raw) <= stream_tolerance(stream_unit)
+        item for item in candidates if abs(item.value_raw - truth_state.value_raw) <= stream_tolerance(truth_state.stream_unit)
     ]
 
     if same_value_candidates:
@@ -568,34 +525,30 @@ def evaluate_matches(memory: MonitorMemory, truth_state: TruthState) -> None:
         log(
             "MATCH",
             (
-                f"stream={stream_unit} source_mode={truth_state.source_mode} "
-                f"truth_value={fmt_decimal(truth_state.value_raw)}°{stream_unit} "
-                f"truth_valid_time_gmt={truth_state.valid_time_gmt} "
-                f"preview_valid_time_gmt={match.valid_time_gmt} "
+                f"page={truth_state.page_url} stream={truth_state.stream_unit} source_mode={truth_state.source_mode} "
+                f"truth_value={fmt_decimal(truth_state.value_raw)}°{truth_state.stream_unit} "
+                f"truth_valid_time_gmt={truth_state.valid_time_gmt} preview_valid_time_gmt={match.valid_time_gmt} "
                 f"lag_seconds={lag_seconds:.1f}"
             ),
             {
-                "stream_unit": stream_unit,
+                "page_url": truth_state.page_url,
+                "location_id": truth_state.location_id,
+                "stream_unit": truth_state.stream_unit,
                 "source_mode": truth_state.source_mode,
                 "truth_value_raw": fmt_decimal(truth_state.value_raw, 6),
                 "truth_valid_time_gmt": truth_state.valid_time_gmt,
                 "preview_valid_time_gmt": match.valid_time_gmt,
                 "preview_value_raw": fmt_decimal(match.value_raw, 6),
                 "lag_seconds": round(lag_seconds, 3),
-                "preview_first_seen_wall": match.first_seen_wall,
-                "truth_first_seen_wall": truth_state.first_seen_wall,
             },
         )
 
         to_delete: List[str] = []
-        for key, item in pending_map.items():
-            if (
-                abs(item.value_raw - truth_state.value_raw) <= stream_tolerance(stream_unit)
-                and item.valid_time_gmt <= match.valid_time_gmt
-            ):
-                to_delete.append(key)
-        for key in to_delete:
-            pending_map.pop(key, None)
+        for bucket_key, item in pending_map.items():
+            if abs(item.value_raw - truth_state.value_raw) <= stream_tolerance(truth_state.stream_unit) and item.valid_time_gmt <= match.valid_time_gmt:
+                to_delete.append(bucket_key)
+        for bucket_key in to_delete:
+            pending_map.pop(bucket_key, None)
         return
 
     closest = min(candidates, key=lambda x: abs(x.value_raw - truth_state.value_raw))
@@ -604,15 +557,15 @@ def evaluate_matches(memory: MonitorMemory, truth_state: TruthState) -> None:
     log(
         "DIFF",
         (
-            f"stream={stream_unit} source_mode={truth_state.source_mode} "
-            f"truth_value={fmt_decimal(truth_state.value_raw)}°{stream_unit} "
-            f"truth_valid_time_gmt={truth_state.valid_time_gmt} "
-            f"closest_preview_value={fmt_decimal(closest.value_raw)}°{stream_unit} "
-            f"preview_valid_time_gmt={closest.valid_time_gmt} "
-            f"delta={fmt_decimal(delta)}°{stream_unit}"
+            f"page={truth_state.page_url} stream={truth_state.stream_unit} source_mode={truth_state.source_mode} "
+            f"truth_value={fmt_decimal(truth_state.value_raw)}°{truth_state.stream_unit} truth_valid_time_gmt={truth_state.valid_time_gmt} "
+            f"closest_preview_value={fmt_decimal(closest.value_raw)}°{truth_state.stream_unit} preview_valid_time_gmt={closest.valid_time_gmt} "
+            f"delta={fmt_decimal(delta)}°{truth_state.stream_unit}"
         ),
         {
-            "stream_unit": stream_unit,
+            "page_url": truth_state.page_url,
+            "location_id": truth_state.location_id,
+            "stream_unit": truth_state.stream_unit,
             "source_mode": truth_state.source_mode,
             "truth_value_raw": fmt_decimal(truth_state.value_raw, 6),
             "truth_valid_time_gmt": truth_state.valid_time_gmt,
@@ -626,33 +579,47 @@ def evaluate_matches(memory: MonitorMemory, truth_state: TruthState) -> None:
 # ============================================================
 # MAIN
 # ============================================================
-def main() -> int:
-    global LOCATION_ID
+def build_page_contexts() -> List[PageContext]:
+    seen: Dict[str, bool] = {}
+    contexts: List[PageContext] = []
+    for page_url in TARGET_PAGES:
+        if page_url in seen:
+            continue
+        seen[page_url] = True
+        contexts.append(
+            PageContext(
+                page_url=page_url,
+                location_id=derive_location_id_from_url(page_url),
+                date_key=derive_history_date_from_url(page_url),
+            )
+        )
+    return contexts
 
+
+def main() -> int:
     if RUN_MODE not in {"preview_only", "truth_only", "truth_plus_preview"}:
         raise RuntimeError(f"Unsupported RUN_MODE: {RUN_MODE!r}")
 
+    page_contexts = build_page_contexts()
+    if len(page_contexts) != 3:
+        raise RuntimeError(f"Expected exactly 3 unique TARGET_PAGES, got {len(page_contexts)}")
+
     session = build_session()
-    date_key = derive_history_date_from_url(TARGET_PAGES[0])
-
-    if LOCATION_ID is None:
-        LOCATION_ID = resolve_location_id_from_page_api(session, TARGET_PAGE_URL)
-
     memory = MonitorMemory()
 
     log("CFG", f"RUN_MODE={RUN_MODE}")
-    log("CFG", f"TARGET_PAGE_URL={TARGET_PAGE_URL}")
-    log("CFG", f"LOCATION_ID={LOCATION_ID}")
-    log("CFG", f"HISTORY_DATE={date_key}")
+    log("CFG", f"TARGET_PAGES={TARGET_PAGES}")
     log("CFG", f"CHECK_INTERVAL_SECONDS={CHECK_INTERVAL_SECONDS}")
     log("CFG", f"TRUTH_SOURCE=historical_json")
     log("CFG", f"TRUTH_ARRAY_POINT_MODE={TRUTH_ARRAY_POINT_MODE}")
-    log("CFG", f"ENABLE_CONSOLE_ALERT={ENABLE_CONSOLE_ALERT}")
+    log("CFG", f"ENABLE_DESKTOP_ALERT={ENABLE_DESKTOP_ALERT}")
     log("CFG", f"ENABLE_BELL_ALERT={ENABLE_BELL_ALERT}")
+
+    for ctx in page_contexts:
+        log("CFG", f"PAGE={ctx.page_url} LOCATION_ID={ctx.location_id} HISTORY_DATE={ctx.date_key}")
 
     if LOG_TO_FILE:
         log("CFG", f"LOG_FILE_PATH={LOGGER.text_path}")
-
     if WRITE_JSONL_EVENTS:
         log("CFG", f"JSONL_FILE_PATH={LOGGER.jsonl_path}")
 
@@ -660,15 +627,16 @@ def main() -> int:
         try:
             memory.poll_count += 1
 
-            if RUN_MODE in {"preview_only", "truth_plus_preview"}:
-                preview_states = fetch_preview_states(session, LOCATION_ID, date_key)
-                for stream_unit in ("C", "F"):
-                    process_preview_state(memory, preview_states[stream_unit])
+            for ctx in page_contexts:
+                if RUN_MODE in {"preview_only", "truth_plus_preview"}:
+                    preview_states = fetch_preview_states(session, ctx)
+                    process_preview_state(memory, preview_states["C"])
+                    process_preview_state(memory, preview_states["F"])
 
-            if RUN_MODE in {"truth_only", "truth_plus_preview"}:
-                truth_states = fetch_truth_states(session, LOCATION_ID, date_key, TRUTH_ARRAY_POINT_MODE)
-                for stream_unit in ("C", "F"):
-                    process_truth_state(memory, truth_states[stream_unit])
+                if RUN_MODE in {"truth_only", "truth_plus_preview"}:
+                    truth_states = fetch_truth_states(session, ctx, TRUTH_ARRAY_POINT_MODE)
+                    process_truth_state(memory, truth_states["C"])
+                    process_truth_state(memory, truth_states["F"])
 
         except KeyboardInterrupt:
             log("STOP", "Stopped by user.")
@@ -691,6 +659,8 @@ if __name__ == "__main__":
     except SystemExit:
         raise
     except Exception as exc:
+        import traceback
+        traceback.print_exc()
         print(f"[FATAL] {type(exc).__name__}: {exc}", flush=True)
         print()
         input("Press Enter to exit...")
