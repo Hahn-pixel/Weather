@@ -232,7 +232,11 @@ def derive_history_date_from_url(url: str) -> str:
 
 
 def derive_location_id_from_url(url: str) -> str:
-    match = re.search(r"/history/daily/([a-z]{2})/.+?/([A-Z0-9]{3,8})(?:/|$)", url, re.IGNORECASE)
+    match = re.search(
+        r"/history/daily/([a-z]{2})/.+?/([A-Z0-9]{3,8})/date/\d{4}-\d{1,2}-\d{1,2}(?:/|$)",
+        url,
+        re.IGNORECASE,
+    )
     if not match:
         raise RuntimeError(f"Cannot derive station from URL: {url}")
     country = match.group(1).upper()
