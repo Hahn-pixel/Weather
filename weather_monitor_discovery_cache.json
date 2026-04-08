@@ -1,0 +1,282 @@
+{
+  "https://www.wunderground.com/history/daily/ar/ezeiza/SAEZ": {
+    "location_id": "SAEZ:9:AR",
+    "guessed_location_id": "SAEZ:9:AR",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/br/guarulhos/SBGR": {
+    "location_id": "SBGR:9:BR",
+    "guessed_location_id": "SBGR:9:BR",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/ca/mississauga/CYYZ": {
+    "location_id": "CYYZ:9:CA",
+    "guessed_location_id": "CYYZ:9:CA",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/cn/beijing/ZBAA": {
+    "location_id": "ZBAA:9:CN",
+    "guessed_location_id": "ZBAA:9:CN",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/cn/chengdu/ZUUU": {
+    "location_id": "ZUUU:9:CN",
+    "guessed_location_id": "ZUUU:9:CN",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/cn/chongqing/ZUCK": {
+    "location_id": "ZUCK:9:CN",
+    "guessed_location_id": "ZUCK:9:CN",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/cn/shanghai/ZSPD": {
+    "location_id": "ZSPD:9:CN",
+    "guessed_location_id": "ZSPD:9:CN",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/cn/shenzhen/ZGSZ": {
+    "location_id": "ZGSZ:9:CN",
+    "guessed_location_id": "ZGSZ:9:CN",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/cn/wuhan/ZHHH": {
+    "location_id": "ZHHH:9:CN",
+    "guessed_location_id": "ZHHH:9:CN",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/de/munich/EDDM": {
+    "location_id": "EDDM:9:DE",
+    "guessed_location_id": "EDDM:9:DE",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/es/madrid/LEMD": {
+    "location_id": "LEMD:9:ES",
+    "guessed_location_id": "LEMD:9:ES",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/fi/vantaa/EFHK": {
+    "location_id": "EFHK:9:FI",
+    "guessed_location_id": "EFHK:9:FI",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/fr/paris/LFPG": {
+    "location_id": "LFPG:9:FR",
+    "guessed_location_id": "LFPG:9:FR",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/gb/london/EGLC": {
+    "location_id": "EGLC:9:GB",
+    "guessed_location_id": "EGLC:9:GB",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/id/jakarta/WIHH": {
+    "location_id": "WIHH:9:ID",
+    "guessed_location_id": "WIHH:9:ID",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/in/lucknow/VILK": {
+    "location_id": "VILK:9:IN",
+    "guessed_location_id": "VILK:9:IN",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/it/milan/LIMC": {
+    "location_id": "LIMC:9:IT",
+    "guessed_location_id": "LIMC:9:IT",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/jp/tokyo/RJTT": {
+    "location_id": "RJTT:9:JP",
+    "guessed_location_id": "RJTT:9:JP",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/kr/busan/RKPK": {
+    "location_id": "RKPK:9:KR",
+    "guessed_location_id": "RKPK:9:KR",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/kr/incheon/RKSI": {
+    "location_id": "RKSI:9:KR",
+    "guessed_location_id": "RKSI:9:KR",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/mx/mexico-city/MMMX": {
+    "location_id": "MMMX:9:MX",
+    "guessed_location_id": "MMMX:9:MX",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/my/sepang-district/WMKK": {
+    "location_id": "WMKK:9:MY",
+    "guessed_location_id": "WMKK:9:MY",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/nl/schiphol/EHAM": {
+    "location_id": "EHAM:9:NL",
+    "guessed_location_id": "EHAM:9:NL",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/nz/wellington/NZWN": {
+    "location_id": "NZWN:9:NZ",
+    "guessed_location_id": "NZWN:9:NZ",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/pa/panama-city/MPMG": {
+    "location_id": "MPMG:9:PA",
+    "guessed_location_id": "MPMG:9:PA",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/pl/warsaw/EPWA": {
+    "location_id": "EPWA:9:PL",
+    "guessed_location_id": "EPWA:9:PL",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/sg/singapore/WSSS": {
+    "location_id": "WSSS:9:SG",
+    "guessed_location_id": "WSSS:9:SG",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/tr/%C3%A7ubuk/LTAC": {
+    "location_id": "LTAC:9:TR",
+    "guessed_location_id": "LTAC:9:TR",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/tw/taipei/RCSS": {
+    "location_id": "RCSS:9:TW",
+    "guessed_location_id": "RCSS:9:TW",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/us/ca/los-angeles/KLAX": {
+    "location_id": "KLAX:9:US",
+    "guessed_location_id": "KLAX:9:US",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/us/ca/san-francisco/KSFO": {
+    "location_id": "KSFO:9:US",
+    "guessed_location_id": "KSFO:9:US",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/us/co/aurora/KBKF": {
+    "location_id": "KBKF:9:US",
+    "guessed_location_id": "KBKF:9:US",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/us/fl/miami/KMIA": {
+    "location_id": "KMIA:9:US",
+    "guessed_location_id": "KMIA:9:US",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/us/ga/atlanta/KATL": {
+    "location_id": "KATL:9:US",
+    "guessed_location_id": "KATL:9:US",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/us/il/chicago/KORD": {
+    "location_id": "KORD:9:US",
+    "guessed_location_id": "KORD:9:US",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/us/ny/new-york-city/KLGA": {
+    "location_id": "KLGA:9:US",
+    "guessed_location_id": "KLGA:9:US",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/us/tx/austin/KAUS": {
+    "location_id": "KAUS:9:US",
+    "guessed_location_id": "KAUS:9:US",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/us/tx/dallas/KDAL": {
+    "location_id": "KDAL:9:US",
+    "guessed_location_id": "KDAL:9:US",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/us/tx/houston/KHOU": {
+    "location_id": "KHOU:9:US",
+    "guessed_location_id": "KHOU:9:US",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  },
+  "https://www.wunderground.com/history/daily/us/wa/seatac/KSEA": {
+    "location_id": "KSEA:9:US",
+    "guessed_location_id": "KSEA:9:US",
+    "geocode": "",
+    "timezone_name": "",
+    "timezone_offset_minutes": 0
+  }
+}
